@@ -40,12 +40,14 @@ st.markdown("""
         background-color: #f0f2f6;
         border-radius: 8px;
         padding: 10px 20px;
+        color: #31333F; /* Force dark text for visibility on light background in Dark Mode */
+        transition: color 0.3s ease; /* Smooth transition for hover effect */
     }
     
     /* Generic selected tab style (fallback) */
     .stTabs [aria-selected="true"] {
         background-color: #7eb8da;
-        color: white;
+        color: white !important; /* Force white text on selected tab */
     }
 
     /* --- Main Tabs Specific Colors --- */
@@ -55,11 +57,19 @@ st.markdown("""
         background-color: #5DADE2 !important;
         color: white !important;
     }
+    /* Hover Effect for Tab 1 (Unselected) */
+    .stTabs [data-baseweb="tab-list"] button:nth-of-type(1):not([aria-selected="true"]):hover {
+        color: #5DADE2 !important;
+    }
     
     /* Tab 2: Power Analyzer - Vivid Orange */
     .stTabs [data-baseweb="tab-list"] button:nth-of-type(2)[aria-selected="true"] {
         background-color: #E67E22 !important;
         color: white !important;
+    }
+    /* Hover Effect for Tab 2 (Unselected) */
+    .stTabs [data-baseweb="tab-list"] button:nth-of-type(2):not([aria-selected="true"]):hover {
+        color: #E67E22 !important;
     }
     
     /* Tab 3: Tilt Data - Pastel Red */
@@ -67,17 +77,29 @@ st.markdown("""
         background-color: #E74C3C !important;
         color: white !important;
     }
+    /* Hover Effect for Tab 3 (Unselected) */
+    .stTabs [data-baseweb="tab-list"] button:nth-of-type(3):not([aria-selected="true"]):hover {
+        color: #E74C3C !important;
+    }
     
     /* Tab 4: FFT - Pastel Yellow */
     .stTabs [data-baseweb="tab-list"] button:nth-of-type(4)[aria-selected="true"] {
         background-color: #F4D03F !important;
         color: black !important;
     }
+    /* Hover Effect for Tab 4 (Unselected) */
+    .stTabs [data-baseweb="tab-list"] button:nth-of-type(4):not([aria-selected="true"]):hover {
+        color: #F4D03F !important;
+    }
     
     /* Tab 5: GPS - Pastel Green */
     .stTabs [data-baseweb="tab-list"] button:nth-of-type(5)[aria-selected="true"] {
         background-color: #58D68D !important;
         color: white !important;
+    }
+    /* Hover Effect for Tab 5 (Unselected) */
+    .stTabs [data-baseweb="tab-list"] button:nth-of-type(5):not([aria-selected="true"]):hover {
+        color: #58D68D !important;
     }
 
     /* --- Nested/Sub Tabs (FFT) --- */
@@ -86,6 +108,10 @@ st.markdown("""
     .stTabs .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
         background-color: #F4D03F !important;
         color: black !important;
+    }
+    /* Subtab Hover - also yellow */
+    .stTabs .stTabs [data-baseweb="tab-list"] button:not([aria-selected="true"]):hover {
+        color: #F4D03F !important;
     }
 
     /* Hide red indicator under tabs */
