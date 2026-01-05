@@ -1,0 +1,8 @@
+# DB Plotter - Startup Commands
+# ==============================
+
+# 1. Activate the virtual environment:
+.\venv\Scripts\Activate.ps1
+
+# 2. Run the Streamlit application:
+streamlit run DB_Plotter.py
