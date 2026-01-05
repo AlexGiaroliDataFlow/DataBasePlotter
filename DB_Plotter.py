@@ -13,6 +13,7 @@ from plotly.subplots import make_subplots
 from pathlib import Path
 import numpy as np
 from datetime import timedelta
+import json
 
 # Page configuration
 st.set_page_config(
@@ -807,7 +808,7 @@ def plot_tilt_data(df: pd.DataFrame, show_quality: bool = True):
 
 
 
-def plot_fft_data(df: pd.DataFrame):
+def plot_fft_data(df: pd.DataFrame, show_mqtt_calc: bool = True):
     """Create interactive bar charts for FFT data."""
     if df.empty:
         st.warning("No FFT data available.")
@@ -918,6 +919,44 @@ def plot_fft_data(df: pd.DataFrame):
                 st.metric("Ground Average", f"{ground_average:.4f}")
             with col5:
                 st.metric(f"Peaks > {percentile_value}th", peaks_above)
+                
+            if show_mqtt_calc:
+                # Construct optimized payload
+                # Format: {"ts": <unix_ts or 0>, "avg": <val>, "peaks": [[idx, val], ...]}
+                
+                # Get timestamps from row if available, else 0
+                ts_val = 0
+                if 'unix_start' in row and pd.notna(row['unix_start']):
+                     ts_val = int(row['unix_start'])
+
+                # Find peaks (val > percentile, returning [freq_index, amplitude])
+                peaks_list = []
+                for i, val in enumerate(fft_values):
+                    if val > percentile_threshold:
+                        peaks_list.append([i, round(val, 2)])
+                
+                payload = {
+                    "type": "acc" if row.get('type') == 'acceleration' else ("vel" if row.get('type') == 'velocity' else row.get('type', 'N/A')),
+                    "points": int(row.get('number_of_points', len(fft_cols))),
+                    "axis": row.get('axis', 'N/A'),
+                    "ts": ts_val,
+                    "avg": round(ground_average, 2),
+                    "peaks": peaks_list
+                }
+                
+                json_str = json.dumps(payload, separators=(',', ':'))
+                payload_size = len(json_str)
+                
+                st.markdown("---")
+                st.subheader("MQTT Analysis")
+                c1, c2 = st.columns([1, 3])
+                with c1:
+                    st.metric("Est. Payload Size", f"{payload_size} bytes")
+                    st.caption(f"Peaks sent: {len(peaks_list)}")
+                with c2:
+                    with st.expander("View JSON Payload", expanded=False):
+                        st.text("Raw Compact JSON (One Line):")
+                        st.code(json_str, language='json', line_numbers=False)
         
         # First FFT viewer
         st.subheader("Primary FFT")
@@ -1262,6 +1301,7 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.subheader("Analysis Settings")
     show_quality = st.sidebar.toggle("Show Transmission Quality", value=True, help="Highlight missing data and show success rate.")
+    show_mqtt_calc = st.sidebar.toggle("Show MQTT Optimization", value=True, help="Calculate and show optimized MQTT JSON payload size.")
     
     # File uploader for custom database
 
@@ -1327,7 +1367,7 @@ def main():
     with tab4:
         if check_table_exists(conn, 'fft_data'):
             df_fft = get_table_data(conn, 'fft_data')
-            plot_fft_data(df_fft)
+            plot_fft_data(df_fft, show_mqtt_calc)
         else:
             st.warning("FFT data table not found in database.")
     
