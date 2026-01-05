@@ -236,9 +236,11 @@ def analyze_transmission_quality(df: pd.DataFrame, time_col: str = 'datetime', c
     
     # --- 2. Local Gap Detection (Sensor Faults) ---
     if column_name and column_name in df.columns:
+        # Sort by time to ensure grouping works
+        df_local = df.sort_values(time_col)
+        
         # Check for NaN or infinite values
-        # Convert to numeric first to be safe (coercing errors to NaN)
-        series = pd.to_numeric(df[column_name], errors='coerce')
+        series = pd.to_numeric(df_local[column_name], errors='coerce')
         
         # Identify invalid indices
         invalid_mask = series.isna()
@@ -354,110 +356,120 @@ def plot_sensor_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc
 
     # Create individual plots for each sensor
     for idx, col in enumerate(valid_cols):
-        line_color = PASTEL_COLORS[idx % len(PASTEL_COLORS)]
-        
-        # Create separate figure
-        fig = go.Figure()
-        
-        # Trace 1: Raw Data
-        fig.add_trace(go.Scatter(
-            x=df_filtered[x_axis],
-            y=df_filtered[col],
-            mode='lines',
-            name=col,
-            line=dict(color=line_color, width=1),
-            opacity=0.7,
-            hovertemplate=f'{col}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
-        ))
-        
-        # Calculate Moving Average
-        window_size = max(10, len(df_filtered) // 50)
-        col_avg = df_filtered[col].rolling(window=window_size, center=True).mean()
-        
-        # Trace 2: Average
-        fig.add_trace(go.Scatter(
-            x=df_filtered[x_axis],
-            y=col_avg,
-            mode='lines',
-            name=f'{col} Avg',
-            line=dict(color=line_color, width=2.5),
-            hovertemplate=f'{col} Avg: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
-        ))
-        
-        fig.update_layout(
-            title=col.replace('_', ' ').title(),
-            height=300,
-            margin=dict(l=20, r=20, t=40, b=20),
-            showlegend=True,
-            hovermode='x unified',
-            yaxis_title=col
-        )
+        try:
+            line_color = PASTEL_COLORS[idx % len(PASTEL_COLORS)]
+            
+            # Create separate figure
+            fig = go.Figure()
+            
+            # Trace 1: Raw Data
+            fig.add_trace(go.Scatter(
+                x=df_filtered[x_axis],
+                y=df_filtered[col],
+                mode='lines',
+                name=col,
+                line=dict(color=line_color, width=1),
+                opacity=0.7,
+                hovertemplate=f'{col}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+            ))
+            
+            # Calculate Moving Average
+            window_size = max(10, len(df_filtered) // 50)
+            col_avg = df_filtered[col].rolling(window=window_size, center=True).mean()
+            
+            # Trace 2: Average
+            fig.add_trace(go.Scatter(
+                x=df_filtered[x_axis],
+                y=col_avg,
+                mode='lines',
+                name=f'{col} Avg',
+                line=dict(color=line_color, width=2.5),
+                hovertemplate=f'{col} Avg: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+            ))
+            
+            fig.update_layout(
+                title=col.replace('_', ' ').title(),
+                height=300,
+                margin=dict(l=20, r=20, t=40, b=20),
+                showlegend=True,
+                hovermode='x unified',
+                yaxis_title=col
+            )
 
-        # Transmission Quality Analysis per sensor
-        if show_quality:
-            stats, global_gaps, local_gaps = analyze_transmission_quality(df_filtered, x_axis, column_name=col)
-            
-            # 1. Visualize Global Gaps (Transmission Loss) - Full Height Red Zones
-            for gap in global_gaps:
-                fig.add_vrect(
-                    x0=gap['start'],
-                    x1=gap['end'],
-                    fillcolor="red",
-                    opacity=0.1,
-                    layer="below",
-                    line_width=0
-                )
-                fig.add_annotation(
-                    x=gap['start'],
-                    y=1,
-                    yref="paper",
-                    text="No Signal",
-                    showarrow=False,
-                    xanchor="left",
-                    yanchor="top",
-                    font=dict(size=8, color="red")
-                )
-            
-            # 2. Visualize Local Gaps (Sensor Faults) - Markers or specific indications
-            # Since local gaps are specific points (or ranges) where data exists but is invalid
-            if local_gaps:
-                # Collect timestamps
-                fault_times = [g['start'] for g in local_gaps]
-                # Determine Y position (use min of data or 0)
-                y_pos = df_filtered[col].min() if not pd.isna(df_filtered[col].min()) else 0
+            # Transmission Quality Analysis per sensor
+            if show_quality:
+                # Debug: Ensure column exists
+                if col not in df_filtered.columns:
+                     st.error(f"Column {col} missing from dataframe")
+                     continue
+                     
+                stats, global_gaps, local_gaps = analyze_transmission_quality(df_filtered, x_axis, column_name=col)
                 
-                fig.add_trace(go.Scatter(
-                    x=fault_times,
-                    y=[y_pos] * len(fault_times), 
-                    mode='markers',
-                    marker=dict(symbol='x', color='orange', size=8),
-                    name='Invalid Value',
-                    hoverinfo='skip'
-                ))
-
-
-            st.plotly_chart(fig, width="stretch", key=f"sensor_plot_{idx}")
-            
-            # Metrics Row
-            m1, m2, m3, m4, m5 = st.columns(5)
-            with m1:
-                st.metric("Success Rate", f"{stats['success_rate']:.2f}%")
-            with m2:
-                st.metric("Valid Packets", stats['actual'] - stats['local_lost'])
-            with m3:
-                st.metric("Transmission Loss", stats['global_lost'], help="Packets not received (network gap)")
-            with m4:
-                st.metric("Sensor Faults", stats['local_lost'], help="Packets received but value is invalid (NaN/Text)")
-            with m5:
-                st.metric("Total Expected", stats['expected'])
+                # 1. Visualize Global Gaps (Transmission Loss) - Full Height Red Zones
+                for gap in global_gaps:
+                    fig.add_vrect(
+                        x0=gap['start'],
+                        x1=gap['end'],
+                        fillcolor="red",
+                        opacity=0.1,
+                        layer="below",
+                        line_width=0
+                    )
+                    fig.add_annotation(
+                        x=gap['start'],
+                        y=1,
+                        yref="paper",
+                        text="No Signal",
+                        showarrow=False,
+                        xanchor="left",
+                        yanchor="top",
+                        font=dict(size=8, color="red")
+                    )
                 
-            if stats['success_rate'] < 95.0:
-                 st.error(f"Issue detected with {col}: {stats['total_lost']} total lost packets.")
-            
-            if idx < len(valid_cols) - 1:
-                st.markdown("---") # Separator between sensors
-        else:
-            st.plotly_chart(fig, width="stretch", key=f"sensor_plot_{idx}")
+                # 2. Visualize Local Gaps (Sensor Faults) - Markers or specific indications
+                # Since local gaps are specific points (or ranges) where data exists but is invalid
+                if local_gaps:
+                    # Collect timestamps
+                    fault_times = [g['start'] for g in local_gaps]
+                    # Determine Y position (use min of data or 0)
+                    y_pos = df_filtered[col].min() if not pd.isna(df_filtered[col].min()) else 0
+                    
+                    fig.add_trace(go.Scatter(
+                        x=fault_times,
+                        y=[y_pos] * len(fault_times), 
+                        mode='markers',
+                        marker=dict(symbol='x', color='orange', size=8),
+                        name='Invalid Value',
+                        hoverinfo='skip'
+                    ))
+
+
+                st.plotly_chart(fig, width="stretch", key=f"sensor_plot_{idx}")
+                
+                # Metrics Row
+                m1, m2, m3, m4, m5 = st.columns(5)
+                with m1:
+                    st.metric("Success Rate", f"{stats['success_rate']:.2f}%")
+                with m2:
+                    st.metric("Valid Packets", stats['actual'] - stats['local_lost'])
+                with m3:
+                    st.metric("Transmission Loss", stats['global_lost'], help="Packets not received (network gap)")
+                with m4:
+                    st.metric("Sensor Faults", stats['local_lost'], help="Packets received but value is invalid (NaN/Text)")
+                with m5:
+                    st.metric("Total Expected", stats['expected'])
+                    
+                if stats['success_rate'] < 95.0:
+                     st.error(f"Issue detected with {col}: {stats['total_lost']} total lost packets.")
+                
+                if idx < len(valid_cols) - 1:
+                    st.markdown("---") # Separator between sensors
+            else:
+                st.plotly_chart(fig, width="stretch", key=f"sensor_plot_{idx}")
+                
+        except Exception as e:
+            st.error(f"Error plotting {col}: {e}")
+
 
     # MQTT Packet Weight Analysis
     if show_mqtt_calc and not df_filtered.empty:
@@ -664,134 +676,134 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
     # REFACTORING Power Analyzer Loop to render chart + stats individually per GROUP
     
     for idx, definition in enumerate(plot_definitions):
-        col = definition['col'] # This was for single-col loop, but wait...
-        # The previous code logic was: plot_definitions had one entry per COLUMN, but they were all added to ONE make_subplots figure.
-        # We want to break that figure apart.
-        
-        # Re-creating the figure for just THIS column (or group?)
-        # The 'groups' logic in previous code was just to select columns. 
-        # But 'plot_definitions' flattened it into a list of columns to plot in order.
-        # So essentially it WAS plotting one column per subplot row.
-        # So we can just make individual charts! Perfect.
-        
-        row_num = idx + 1
-        
-         # Determine unit label
-        if col in power_cols_kilo:
-            if col == 'Psys':
-                unit = 'kW'
-            elif col == 'Qsys':
-                 unit = 'kVAR'
+        try:
+            col = definition['col']
+            
+            row_num = idx + 1
+            
+             # Determine unit label
+            if col in power_cols_kilo:
+                if col == 'Psys':
+                    unit = 'kW'
+                elif col == 'Qsys':
+                     unit = 'kVAR'
+                else:
+                     unit = 'kVA'
+                y_label = f"{col} ({unit})"
             else:
-                 unit = 'kVA'
-            y_label = f"{col} ({unit})"
-        else:
-            y_label = col
-            
-        line_color = PASTEL_COLORS[idx % len(PASTEL_COLORS)]
-        
-        # New Figure
-        fig = go.Figure()
-
-        # Trace 1: Raw
-        fig.add_trace(go.Scatter(
-            x=df_filtered[x_axis],
-            y=df_filtered[col],
-            mode='lines',
-            name=col,
-            line=dict(color=line_color, width=1),
-            opacity=0.7,
-            hovertemplate=f'{col}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
-        ))
-        
-        # Calculate Moving Average
-        window_size = max(10, len(df_filtered) // 50)
-        col_avg = df_filtered[col].rolling(window=window_size, center=True).mean()
-        
-        # Trace 2: Average
-        fig.add_trace(go.Scatter(
-            x=df_filtered[x_axis],
-            y=col_avg,
-            mode='lines',
-            name=f'{col} Avg',
-            line=dict(color=line_color, width=2.5),
-            hovertemplate=f'{col} Avg: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
-        ))
-        
-        group_title = definition['group']
-        # Maybe use Group + Col name
-        
-        fig.update_layout(
-             title=f"{col} ({group_title})",
-             height=300,
-             margin=dict(l=20, r=20, t=40, b=20),
-             showlegend=True,
-             hovermode='x unified',
-             yaxis_title=y_label
-        )
-        
-         # Transmission Quality
-        if show_quality:
-            stats, global_gaps, local_gaps = analyze_transmission_quality(df_filtered, x_axis, column_name=col)
-            
-            # Global Gaps
-            for gap in global_gaps:
-                fig.add_vrect(
-                    x0=gap['start'],
-                    x1=gap['end'],
-                    fillcolor="red",
-                    opacity=0.1,
-                    layer="below",
-                    line_width=0
-                )
-                fig.add_annotation(
-                    x=gap['start'],
-                    y=1,
-                    yref="paper",
-                    text="No Signal",
-                    showarrow=False,
-                    xanchor="left",
-                    yanchor="top",
-                    font=dict(size=8, color="red")
-                )
-            
-            # Local Gaps
-            if local_gaps:
-                fault_times = [g['start'] for g in local_gaps]
-                y_pos = df_filtered[col].min() if not pd.isna(df_filtered[col].min()) else 0
+                y_label = col
                 
-                fig.add_trace(go.Scatter(
-                    x=fault_times,
-                    y=[y_pos] * len(fault_times), 
-                    mode='markers',
-                    marker=dict(symbol='x', color='orange', size=8),
-                    name='Invalid Value',
-                    hoverinfo='skip'
-                ))
-
-
-            st.plotly_chart(fig, width="stretch", key=f"power_plot_{idx}")
+            line_color = PASTEL_COLORS[idx % len(PASTEL_COLORS)]
             
-             # Metrics
-            m1, m2, m3, m4, m5 = st.columns(5)
-            with m1:
-                st.metric("Success Rate", f"{stats['success_rate']:.2f}%")
-            with m2:
-                st.metric("Valid Packets", stats['actual'] - stats['local_lost'])
-            with m3:
-                st.metric("Transmission Loss", stats['global_lost'])
-            with m4:
-                st.metric("Sensor Faults", stats['local_lost'])
-            with m5:
-                st.metric("Total Expected", stats['expected'])
+            # New Figure
+            fig = go.Figure()
+
+            # Trace 1: Raw
+            fig.add_trace(go.Scatter(
+                x=df_filtered[x_axis],
+                y=df_filtered[col],
+                mode='lines',
+                name=col,
+                line=dict(color=line_color, width=1),
+                opacity=0.7,
+                hovertemplate=f'{col}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+            ))
+            
+            # Calculate Moving Average
+            window_size = max(10, len(df_filtered) // 50)
+            col_avg = df_filtered[col].rolling(window=window_size, center=True).mean()
+            
+            # Trace 2: Average
+            fig.add_trace(go.Scatter(
+                x=df_filtered[x_axis],
+                y=col_avg,
+                mode='lines',
+                name=f'{col} Avg',
+                line=dict(color=line_color, width=2.5),
+                hovertemplate=f'{col} Avg: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+            ))
+            
+            group_title = definition['group']
+            
+            fig.update_layout(
+                 title=f"{col} ({group_title})",
+                 height=300,
+                 margin=dict(l=20, r=20, t=40, b=20),
+                 showlegend=True,
+                 hovermode='x unified',
+                 yaxis_title=y_label
+            )
+            
+             # Transmission Quality
+            if show_quality:
+                # Debug: Ensure column exists
+                if col not in df_filtered.columns:
+                     st.error(f"Column {col} missing from dataframe")
+                     continue
+
+                stats, global_gaps, local_gaps = analyze_transmission_quality(df_filtered, x_axis, column_name=col)
                 
-            if stats['success_rate'] < 95.0:
-                  st.error(f"Issue detected with {col}: {stats['total_lost']} total lost packets.")
-            
-            if idx < len(plot_definitions) - 1:
-                st.markdown("---")
-        else:
-             st.plotly_chart(fig, width="stretch", key=f"power_plot_{idx}")
+                # Global Gaps
+                for gap in global_gaps:
+                    fig.add_vrect(
+                        x0=gap['start'],
+                        x1=gap['end'],
+                        fillcolor="red",
+                        opacity=0.1,
+                        layer="below",
+                        line_width=0
+                    )
+                    fig.add_annotation(
+                        x=gap['start'],
+                        y=1,
+                        yref="paper",
+                        text="No Signal",
+                        showarrow=False,
+                        xanchor="left",
+                        yanchor="top",
+                        font=dict(size=8, color="red")
+                    )
+                
+                # Local Gaps
+                if local_gaps:
+                    fault_times = [g['start'] for g in local_gaps]
+                    y_pos = df_filtered[col].min() if not pd.isna(df_filtered[col].min()) else 0
+                    
+                    fig.add_trace(go.Scatter(
+                        x=fault_times,
+                        y=[y_pos] * len(fault_times), 
+                        mode='markers',
+                        marker=dict(symbol='x', color='orange', size=8),
+                        name='Invalid Value',
+                        hoverinfo='skip'
+                    ))
+
+
+                st.plotly_chart(fig, width="stretch", key=f"power_plot_{idx}")
+                
+                 # Metrics
+                m1, m2, m3, m4, m5 = st.columns(5)
+                with m1:
+                    st.metric("Success Rate", f"{stats['success_rate']:.2f}%")
+                with m2:
+                    st.metric("Valid Packets", stats['actual'] - stats['local_lost'])
+                with m3:
+                    st.metric("Transmission Loss", stats['global_lost'])
+                with m4:
+                    st.metric("Sensor Faults", stats['local_lost'])
+                with m5:
+                    st.metric("Total Expected", stats['expected'])
+                    
+                if stats['success_rate'] < 95.0:
+                      st.error(f"Issue detected with {col}: {stats['total_lost']} total lost packets.")
+                
+                if idx < len(plot_definitions) - 1:
+                    st.markdown("---")
+            else:
+                 st.plotly_chart(fig, width="stretch", key=f"power_plot_{idx}")
+
+        except Exception as e:
+            st.error(f"Error plotting {definition['col']}: {e}")
 
     # MQTT Packet Weight Analysis
     if show_mqtt_calc and not df_filtered.empty:
@@ -908,198 +920,202 @@ def plot_tilt_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: 
 
     tilt_color = PASTEL_RED  # vivid red
     
-    # Calculate moving average
-    window_size = max(10, len(df_filtered) // 50)
-    df_filtered['tilt_angle_avg'] = df_filtered['tilt_angle'].rolling(window=window_size, center=True).mean()
-    
-    fig = go.Figure()
-    
-    # Trace 1: Raw Data
-    fig.add_trace(go.Scatter(
-        x=df_filtered[x_axis],
-        y=df_filtered['tilt_angle'],
-        mode='lines',
-        name='Tilt Angle',
-        line=dict(color=tilt_color, width=1),
-        opacity=0.5,
-        hovertemplate='Tilt Angle: %{y:.2f} deg<br>Time: %{x}<extra></extra>'
-    ))
-    
-    # Trace 2: Average
-    fig.add_trace(go.Scatter(
-        x=df_filtered[x_axis],
-        y=df_filtered['tilt_angle_avg'],
-        mode='lines',
-        name='Tilt Angle Avg',
-        line=dict(color=tilt_color, width=3),
-        hovertemplate='Tilt Angle Avg: %{y:.2f} deg<br>Time: %{x}<extra></extra>'
-    ))
+    try:
+        # Calculate moving average
+        window_size = max(10, len(df_filtered) // 50)
+        df_filtered['tilt_angle_avg'] = df_filtered['tilt_angle'].rolling(window=window_size, center=True).mean()
+        
+        fig = go.Figure()
+        
+        # Trace 1: Raw Data
+        fig.add_trace(go.Scatter(
+            x=df_filtered[x_axis],
+            y=df_filtered['tilt_angle'],
+            mode='lines',
+            name='Tilt Angle',
+            line=dict(color=tilt_color, width=1),
+            opacity=0.5,
+            hovertemplate='Tilt Angle: %{y:.2f} deg<br>Time: %{x}<extra></extra>'
+        ))
+        
+        # Trace 2: Average
+        fig.add_trace(go.Scatter(
+            x=df_filtered[x_axis],
+            y=df_filtered['tilt_angle_avg'],
+            mode='lines',
+            name='Tilt Angle Avg',
+            line=dict(color=tilt_color, width=3),
+            hovertemplate='Tilt Angle Avg: %{y:.2f} deg<br>Time: %{x}<extra></extra>'
+        ))
 
-    fig.update_layout(
-        title="Tilt Angle Analysis",
-        xaxis_title="Time" if x_axis == 'datetime' else "Sample ID",
-        yaxis_title="Tilt Angle (deg)",
-        height=500,
-        margin=dict(l=20, r=20, t=40, b=20),
-        showlegend=False,
-        hovermode='x unified'
-    )
-    
-    # Add transmission quality visualization
-    if show_quality:
-        # Check purely based on gaps + local validity of tilt_angle
-        stats, global_gaps, local_gaps = analyze_transmission_quality(df_filtered, x_axis, column_name='tilt_angle')
+        fig.update_layout(
+            title="Tilt Angle Analysis",
+            xaxis_title="Time" if x_axis == 'datetime' else "Sample ID",
+            yaxis_title="Tilt Angle (deg)",
+            height=500,
+            margin=dict(l=20, r=20, t=40, b=20),
+            showlegend=False,
+            hovermode='x unified'
+        )
         
-        # Add global gaps
-        for gap in global_gaps:
-            fig.add_vrect(
-                x0=gap['start'],
-                x1=gap['end'],
-                fillcolor="red",
-                opacity=0.1,
-                layer="below",
-                line_width=0
-            )
-            fig.add_annotation(
-                x=gap['start'],
-                y=1,
-                yref="paper",
-                text="No Signal",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                font=dict(size=8, color="red")
-            )
-        
-        # Add local gaps (invalid tilt values)
-        if local_gaps:
-            fault_times = [g['start'] for g in local_gaps]
-            y_pos = df_filtered['tilt_angle'].min() if not pd.isna(df_filtered['tilt_angle'].min()) else 0
-            
-            fig.add_trace(go.Scatter(
-                x=fault_times,
-                y=[y_pos] * len(fault_times),
-                mode='markers',
-                marker=dict(symbol='x', color='orange', size=8),
-                name='Invalid Value',
-                hoverinfo='skip'
-            ))
-
-            
-        st.plotly_chart(fig, width="stretch", key="tilt_main_plot")
-        
-        # Show stats metrics (Quality)
+        # Add transmission quality visualization
         if show_quality:
-            m1, m2, m3, m4, m5 = st.columns(5)
-            with m1:
-                st.metric("Success Rate", f"{stats['success_rate']:.2f}%")
-            with m2:
-                st.metric("Valid Packets", stats['actual'] - stats['local_lost'])
-            with m3:
-                st.metric("Transmission Loss", stats['global_lost'])
-            with m4:
-                st.metric("Sensor Faults", stats['local_lost'])
-            with m5:
-                st.metric("Total Expected", stats['expected'])
-                
-            if stats['success_rate'] < 95.0:
-                 st.error(f"Low quality detected: {stats['success_rate']:.2f}%")
-                 
-        # MQTT Packet Weight Analysis
-        if show_mqtt_calc and not df_filtered.empty:
-            st.markdown("---")
-            st.subheader("MQTT Transmission Simulation")
+            # Check purely based on gaps + local validity of tilt_angle
+            stats, global_gaps, local_gaps = analyze_transmission_quality(df_filtered, x_axis, column_name='tilt_angle')
             
-            # 1. Frequency Slider
-            # Calculate Duration
-            time_min = df_filtered[x_axis].min()
-            time_max = df_filtered[x_axis].max()
-            duration_sec = 0.0
+            # Add global gaps
+            for gap in global_gaps:
+                fig.add_vrect(
+                    x0=gap['start'],
+                    x1=gap['end'],
+                    fillcolor="red",
+                    opacity=0.1,
+                    layer="below",
+                    line_width=0
+                )
+                fig.add_annotation(
+                    x=gap['start'],
+                    y=1,
+                    yref="paper",
+                    text="No Signal",
+                    showarrow=False,
+                    xanchor="left",
+                    yanchor="top",
+                    font=dict(size=8, color="red")
+                )
             
-            if isinstance(time_min, pd.Timestamp):
-                duration_sec = (time_max - time_min).total_seconds()
+            # Add local gaps (invalid tilt values)
+            if local_gaps:
+                fault_times = [g['start'] for g in local_gaps]
+                y_pos = df_filtered['tilt_angle'].min() if not pd.isna(df_filtered['tilt_angle'].min()) else 0
                 
-                # Formatting duration string
-                td = timedelta(seconds=duration_sec)
-                days = td.days
-                hours, remainder = divmod(td.seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                
-                parts = []
-                if days > 0: parts.append(f"{days} days")
-                if hours > 0: parts.append(f"{hours} hours")
-                if minutes > 0: parts.append(f"{minutes} minutes")
-                parts.append(f"{seconds} seconds")
-                duration_str = ", ".join(parts) if parts else "0 seconds"
-                
-                st.info(f"Selected Time Range Duration: **{duration_str}**")
+                fig.add_trace(go.Scatter(
+                    x=fault_times,
+                    y=[y_pos] * len(fault_times),
+                    mode='markers',
+                    marker=dict(symbol='x', color='orange', size=8),
+                    name='Invalid Value',
+                    hoverinfo='skip'
+                ))
 
-            else:
-                duration_sec = float(len(df_filtered))
-                st.info(f"Selected Range: {len(df_filtered)} samples")
                 
-            sim_interval_tilt = st.slider(
-                "Simulated Sampling Interval (Seconds)",
-                min_value=1,
-                max_value=10,
-                value=1,
-                step=1,
-                help="Simulate sending a packet every N seconds.",
-                key="tilt_interval_slider"
-            )
+            st.plotly_chart(fig, width="stretch", key="tilt_main_plot")
             
-            # Ensure duration is at least 1s
-            duration_sec = max(1.0, duration_sec)
+            # Show stats metrics (Quality)
+            if show_quality:
+                m1, m2, m3, m4, m5 = st.columns(5)
+                with m1:
+                    st.metric("Success Rate", f"{stats['success_rate']:.2f}%")
+                with m2:
+                    st.metric("Valid Packets", stats['actual'] - stats['local_lost'])
+                with m3:
+                    st.metric("Transmission Loss", stats['global_lost'])
+                with m4:
+                    st.metric("Sensor Faults", stats['local_lost'])
+                with m5:
+                    st.metric("Total Expected", stats['expected'])
+                    
+                if stats['success_rate'] < 95.0:
+                     st.error(f"Low quality detected: {stats['success_rate']:.2f}%")
+                     
+    except Exception as e:
+        st.error(f"Error plotting tilt data: {e}")
+                 
+    # MQTT Packet Weight Analysis
+    if show_mqtt_calc and not df_filtered.empty:
+        st.markdown("---")
+        st.subheader("MQTT Transmission Simulation")
+        
+        # 1. Frequency Slider
+        # Calculate Duration
+        time_min = df_filtered[x_axis].min()
+        time_max = df_filtered[x_axis].max()
+        duration_sec = 0.0
+        
+        if isinstance(time_min, pd.Timestamp):
+            duration_sec = (time_max - time_min).total_seconds()
             
-            # 3. Construct Payload
-            # For Tilt, we usually have 'tilt_angle'. Let's check other columns too.
-            # We'll use whatever columns are remaining after excluding metadata.
-            tilt_cols = [col for col in df.columns if col not in EXCLUDE_METADATA_COLS]
-            valid_cols = [c for c in tilt_cols if c in df_filtered.columns]
+            # Formatting duration string
+            td = timedelta(seconds=duration_sec)
+            days = td.days
+            hours, remainder = divmod(td.seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            
+            parts = []
+            if days > 0: parts.append(f"{days} days")
+            if hours > 0: parts.append(f"{hours} hours")
+            if minutes > 0: parts.append(f"{minutes} minutes")
+            parts.append(f"{seconds} seconds")
+            duration_str = ", ".join(parts) if parts else "0 seconds"
+            
+            st.info(f"Selected Time Range Duration: **{duration_str}**")
 
-            sample_row = df_filtered.iloc[-1]
+        else:
+            duration_sec = float(len(df_filtered))
+            st.info(f"Selected Range: {len(df_filtered)} samples")
             
-            payload = {}
-            if 'unix_timestamp' in sample_row:
-                 payload['ts'] = int(sample_row['unix_timestamp'])
+        sim_interval_tilt = st.slider(
+            "Simulated Sampling Interval (Seconds)",
+            min_value=1,
+            max_value=10,
+            value=1,
+            step=1,
+            help="Simulate sending a packet every N seconds.",
+            key="tilt_interval_slider"
+        )
+        
+        # Ensure duration is at least 1s
+        duration_sec = max(1.0, duration_sec)
+        
+        # 3. Construct Payload
+        # For Tilt, we usually have 'tilt_angle'. Let's check other columns too.
+        # We'll use whatever columns are remaining after excluding metadata.
+        tilt_cols = [col for col in df.columns if col not in EXCLUDE_METADATA_COLS]
+        valid_cols = [c for c in tilt_cols if c in df_filtered.columns]
+
+        sample_row = df_filtered.iloc[-1]
+        
+        payload = {}
+        if 'unix_timestamp' in sample_row:
+             payload['ts'] = int(sample_row['unix_timestamp'])
+        else:
+             import time
+             payload['ts'] = int(time.time()) # Mock if missing
+             
+        for col in valid_cols:
+            val = sample_row[col]
+            if pd.isna(val) or val is None:
+                payload[col] = float('nan')
             else:
-                 import time
-                 payload['ts'] = int(time.time()) # Mock if missing
-                 
-            for col in valid_cols:
-                val = sample_row[col]
-                if pd.isna(val) or val is None:
-                    payload[col] = float('nan')
-                else:
-                    try:
-                        payload[col] = round(float(val), 2)
-                    except:
-                        payload[col] = str(val)
-                            
-            json_str = json.dumps(payload, separators=(',', ':'), allow_nan=True)
-            
-            # 4. Calculate Weight
-            packet_size_bytes = len(json_str)
-            # Total packets = Duration / Interval
-            total_packets = int(duration_sec / sim_interval_tilt)
-            total_size_bytes = total_packets * packet_size_bytes
-            total_size_mb = total_size_bytes / (1024 * 1024)
-            
-            # Calculate 4KB packets
-            packets_4kb = math.ceil(total_size_bytes / 4096)
-            
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                 st.metric("4KB Packets Needed", f"{packets_4kb:,}", help="Number of 4KB blocks required to transmit total data.")
-            with c2:
-                st.metric("Total Packets (JSON)", f"{total_packets:,}")
-            with c3:
-                 st.metric("Packet Size", f"{packet_size_bytes} bytes")
-            with c4:
-                 st.metric("Total Transmission Size", f"{total_size_mb:.2f} MB")
-                 
-            with st.expander("View Sample JSON Packet", expanded=False):
-                st.code(json_str, language='json')
+                try:
+                    payload[col] = round(float(val), 2)
+                except:
+                    payload[col] = str(val)
+                        
+        json_str = json.dumps(payload, separators=(',', ':'), allow_nan=True)
+        
+        # 4. Calculate Weight
+        packet_size_bytes = len(json_str)
+        # Total packets = Duration / Interval
+        total_packets = int(duration_sec / sim_interval_tilt)
+        total_size_bytes = total_packets * packet_size_bytes
+        total_size_mb = total_size_bytes / (1024 * 1024)
+        
+        # Calculate 4KB packets
+        packets_4kb = math.ceil(total_size_bytes / 4096)
+        
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+             st.metric("4KB Packets Needed", f"{packets_4kb:,}", help="Number of 4KB blocks required to transmit total data.")
+        with c2:
+            st.metric("Total Packets (JSON)", f"{total_packets:,}")
+        with c3:
+             st.metric("Packet Size", f"{packet_size_bytes} bytes")
+        with c4:
+             st.metric("Total Transmission Size", f"{total_size_mb:.2f} MB")
+             
+        with st.expander("View Sample JSON Packet", expanded=False):
+            st.code(json_str, language='json')
 
 
 
@@ -1673,9 +1689,9 @@ def main():
             plot_gps_data(df_gps)
         else:
             st.warning("GPS data table not found in database.")
-    
-    # Close connection
-    conn.close()
+
+
+
     
     # Clean up temporary file if it exists
     temp_path = Path("temp_uploaded.db")
