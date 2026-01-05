@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 from datetime import timedelta
 import json
+import math
 
 # Page configuration
 st.set_page_config(
@@ -321,7 +322,7 @@ def create_date_range_slider(df: pd.DataFrame, key_prefix: str):
     return df[mask].copy(), 'datetime'
 
 
-def plot_sensor_data(df: pd.DataFrame, show_quality: bool = True):
+def plot_sensor_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: bool = True):
 
     """Create interactive time series plots for sensor data."""
     if df.empty:
@@ -457,9 +458,109 @@ def plot_sensor_data(df: pd.DataFrame, show_quality: bool = True):
         else:
             st.plotly_chart(fig, width="stretch", key=f"sensor_plot_{idx}")
 
+    # MQTT Packet Weight Analysis
+    if show_mqtt_calc and not df_filtered.empty:
+        st.markdown("---")
+        st.subheader("MQTT Transmission Simulation")
+        
+        # 1. Frequency Slider
+        # Calculate Duration
+        time_min = df_filtered[x_axis].min()
+        time_max = df_filtered[x_axis].max()
+        duration_sec = 0.0
+        
+        if isinstance(time_min, pd.Timestamp):
+            duration_sec = (time_max - time_min).total_seconds()
+            
+            # Formatting duration string
+            td = timedelta(seconds=duration_sec)
+            days = td.days
+            hours, remainder = divmod(td.seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            
+            parts = []
+            if days > 0: parts.append(f"{days} days")
+            if hours > 0: parts.append(f"{hours} hours")
+            if minutes > 0: parts.append(f"{minutes} minutes")
+            parts.append(f"{seconds} seconds")
+            duration_str = ", ".join(parts) if parts else "0 seconds"
+            
+            st.info(f"Selected Time Range Duration: **{duration_str}**")
+        else:
+             # Fallback if x_axis is not datetime
+            duration_sec = float(len(df_filtered))
+            st.info(f"Selected Range: {len(df_filtered)} samples")
+            
+        sim_interval = st.slider(
+            "Simulated Sampling Interval (Seconds)",
+            min_value=1,
+            max_value=10,
+            value=1,
+            step=1,
+            help="Simulate sending a packet every N seconds.",
+            key="sensor_interval_slider"
+        )
+        
+        # Ensure duration is at least 1s to avoid divide by zero or weirdness
+        duration_sec = max(1.0, duration_sec)
+        
+        # 3. Construct Payload
+        # We need "feature presenti nei grafici" -> valid_cols
+        # Create a sample payload from the FIRST valid row (to simulate size)
+        # OR use a row with NaNs if we want to test that. 
+        # Let's take the last row as a sample.
+        sample_row = df_filtered.iloc[-1]
+        
+        payload = {}
+        # Add timestamp
+        if 'unix_timestamp' in sample_row:
+             payload['ts'] = int(sample_row['unix_timestamp'])
+        else:
+             import time
+             payload['ts'] = int(time.time())
+
+        for col in valid_cols:
+            val = sample_row[col]
+            # Handle NaN
+            if pd.isna(val) or val is None:
+                payload[col] = float('nan')
+            else:
+                try:
+                    payload[col] = round(float(val), 2)
+                except:
+                    payload[col] = str(val)
+        
+        # Optimized JSON (no whitespace)
+        # allow_nan=True is default, but explicit for clarity
+        json_str = json.dumps(payload, separators=(',', ':'), allow_nan=True)
+        
+        # 4. Calculate Weight
+        packet_size_bytes = len(json_str)
+        # Total packets = Duration / Interval
+        total_packets = int(duration_sec / sim_interval)
+        total_size_bytes = total_packets * packet_size_bytes
+        total_size_mb = total_size_bytes / (1024 * 1024)
+        
+        # Calculate 4KB packets
+        packets_4kb = math.ceil(total_size_bytes / 4096)
+        
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+             st.metric("4KB Packets Needed", f"{packets_4kb:,}", help="Number of 4KB blocks required to transmit total data.")
+        with c2:
+            st.metric("Total Packets (JSON)", f"{total_packets:,}")
+        with c3:
+             st.metric("Packet Size", f"{packet_size_bytes} bytes")
+        with c4:
+             st.metric("Total Transmission Size", f"{total_size_mb:.2f} MB")
+             
+        with st.expander("View Sample JSON Packet", expanded=False):
+            st.code(json_str, language='json')
 
 
-def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True):
+
+
+def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: bool = True):
 
     """Create interactive time series plots for power analyzer data."""
     if df.empty:
@@ -690,9 +791,107 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True):
         else:
              st.plotly_chart(fig, width="stretch", key=f"power_plot_{idx}")
 
+    # MQTT Packet Weight Analysis
+    if show_mqtt_calc and not df_filtered.empty:
+        st.markdown("---")
+        st.subheader("MQTT Transmission Simulation")
+        
+        # 1. Frequency Slider
+        # Calculate Duration
+        time_min = df_filtered[x_axis].min()
+        time_max = df_filtered[x_axis].max()
+        duration_sec = 0.0
+        
+        if isinstance(time_min, pd.Timestamp):
+            duration_sec = (time_max - time_min).total_seconds()
+            
+            # Formatting duration string
+            td = timedelta(seconds=duration_sec)
+            days = td.days
+            hours, remainder = divmod(td.seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            
+            parts = []
+            if days > 0: parts.append(f"{days} days")
+            if hours > 0: parts.append(f"{hours} hours")
+            if minutes > 0: parts.append(f"{minutes} minutes")
+            parts.append(f"{seconds} seconds")
+            duration_str = ", ".join(parts) if parts else "0 seconds"
+            
+            st.info(f"Selected Time Range Duration: **{duration_str}**")
+
+        else:
+            duration_sec = float(len(df_filtered))
+            st.info(f"Selected Range: {len(df_filtered)} samples")
+            
+        sim_interval_power = st.slider(
+            "Simulated Sampling Interval (Seconds)",
+            min_value=1,
+            max_value=10,
+            value=1,
+            step=1,
+            help="Simulate sending a packet every N seconds.",
+            key="power_interval_slider"
+        )
+        
+        # Ensure duration is at least 1s
+        
+        duration_sec = max(1.0, duration_sec)
+        
+        # 3. Construct Payload
+        # Features visible in graphs: plot_definitions contains all 'col' keys
+        # We need to construct a unique set of columns
+        visible_cols = set(d['col'] for d in plot_definitions)
+        
+        sample_row = df_filtered.iloc[-1]
+        
+        payload = {}
+        if 'unix_timestamp' in sample_row:
+             payload['ts'] = int(sample_row['unix_timestamp'])
+        else:
+             import time
+             payload['ts'] = int(time.time()) # Mock if missing
+             
+        for col in visible_cols:
+            if col in sample_row:
+                val = sample_row[col]
+                if pd.isna(val) or val is None:
+                    payload[col] = float('nan')
+                else:
+                    try:
+                        payload[col] = round(float(val), 2)
+                    except:
+                        payload[col] = str(val)
+                        
+        json_str = json.dumps(payload, separators=(',', ':'), allow_nan=True)
+        
+        # 4. Calculate Weight
+        packet_size_bytes = len(json_str)
+        # Total packets = Duration / Interval
+        total_packets = int(duration_sec / sim_interval_power)
+        total_size_bytes = total_packets * packet_size_bytes
+        total_size_mb = total_size_bytes / (1024 * 1024)
+        
+        # Calculate 4KB packets
+        packets_4kb = math.ceil(total_size_bytes / 4096)
+        
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+             st.metric("4KB Packets Needed", f"{packets_4kb:,}", help="Number of 4KB blocks required to transmit total data.")
+        with c2:
+            st.metric("Total Packets (JSON)", f"{total_packets:,}")
+        with c3:
+             st.metric("Packet Size", f"{packet_size_bytes} bytes")
+        with c4:
+             st.metric("Total Transmission Size", f"{total_size_mb:.2f} MB")
+             
+        with st.expander("View Sample JSON Packet", expanded=False):
+            st.code(json_str, language='json')
 
 
-def plot_tilt_data(df: pd.DataFrame, show_quality: bool = True):
+
+
+def plot_tilt_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: bool = True):
 
     """Create interactive time series plot for tilt data."""
     if df.empty:
@@ -785,25 +984,120 @@ def plot_tilt_data(df: pd.DataFrame, show_quality: bool = True):
             ))
 
             
-        st.plotly_chart(fig, width="stretch")
-
-        # Show stats metrics
-        m1, m2, m3, m4, m5 = st.columns(5)
-        with m1:
-            st.metric("Success Rate", f"{stats['success_rate']:.2f}%")
-        with m2:
-            st.metric("Valid Packets", stats['actual'] - stats['local_lost'])
-        with m3:
-            st.metric("Transmission Loss", stats['global_lost'])
-        with m4:
-            st.metric("Sensor Faults", stats['local_lost'])
-        with m5:
-            st.metric("Total Expected", stats['expected'])
+        st.plotly_chart(fig, width="stretch", key="tilt_main_plot")
+        
+        # Show stats metrics (Quality)
+        if show_quality:
+            m1, m2, m3, m4, m5 = st.columns(5)
+            with m1:
+                st.metric("Success Rate", f"{stats['success_rate']:.2f}%")
+            with m2:
+                st.metric("Valid Packets", stats['actual'] - stats['local_lost'])
+            with m3:
+                st.metric("Transmission Loss", stats['global_lost'])
+            with m4:
+                st.metric("Sensor Faults", stats['local_lost'])
+            with m5:
+                st.metric("Total Expected", stats['expected'])
+                
+            if stats['success_rate'] < 95.0:
+                 st.error(f"Low quality detected: {stats['success_rate']:.2f}%")
+                 
+        # MQTT Packet Weight Analysis
+        if show_mqtt_calc and not df_filtered.empty:
+            st.markdown("---")
+            st.subheader("MQTT Transmission Simulation")
             
-        if stats['success_rate'] < 95.0:
-             st.error(f"Low quality detected: {stats['success_rate']:.2f}%")
-    else:            
-        st.plotly_chart(fig, width="stretch")
+            # 1. Frequency Slider
+            # Calculate Duration
+            time_min = df_filtered[x_axis].min()
+            time_max = df_filtered[x_axis].max()
+            duration_sec = 0.0
+            
+            if isinstance(time_min, pd.Timestamp):
+                duration_sec = (time_max - time_min).total_seconds()
+                
+                # Formatting duration string
+                td = timedelta(seconds=duration_sec)
+                days = td.days
+                hours, remainder = divmod(td.seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                
+                parts = []
+                if days > 0: parts.append(f"{days} days")
+                if hours > 0: parts.append(f"{hours} hours")
+                if minutes > 0: parts.append(f"{minutes} minutes")
+                parts.append(f"{seconds} seconds")
+                duration_str = ", ".join(parts) if parts else "0 seconds"
+                
+                st.info(f"Selected Time Range Duration: **{duration_str}**")
+
+            else:
+                duration_sec = float(len(df_filtered))
+                st.info(f"Selected Range: {len(df_filtered)} samples")
+                
+            sim_interval_tilt = st.slider(
+                "Simulated Sampling Interval (Seconds)",
+                min_value=1,
+                max_value=10,
+                value=1,
+                step=1,
+                help="Simulate sending a packet every N seconds.",
+                key="tilt_interval_slider"
+            )
+            
+            # Ensure duration is at least 1s
+            duration_sec = max(1.0, duration_sec)
+            
+            # 3. Construct Payload
+            # For Tilt, we usually have 'tilt_angle'. Let's check other columns too.
+            # We'll use whatever columns are remaining after excluding metadata.
+            tilt_cols = [col for col in df.columns if col not in EXCLUDE_METADATA_COLS]
+            valid_cols = [c for c in tilt_cols if c in df_filtered.columns]
+
+            sample_row = df_filtered.iloc[-1]
+            
+            payload = {}
+            if 'unix_timestamp' in sample_row:
+                 payload['ts'] = int(sample_row['unix_timestamp'])
+            else:
+                 import time
+                 payload['ts'] = int(time.time()) # Mock if missing
+                 
+            for col in valid_cols:
+                val = sample_row[col]
+                if pd.isna(val) or val is None:
+                    payload[col] = float('nan')
+                else:
+                    try:
+                        payload[col] = round(float(val), 2)
+                    except:
+                        payload[col] = str(val)
+                            
+            json_str = json.dumps(payload, separators=(',', ':'), allow_nan=True)
+            
+            # 4. Calculate Weight
+            packet_size_bytes = len(json_str)
+            # Total packets = Duration / Interval
+            total_packets = int(duration_sec / sim_interval_tilt)
+            total_size_bytes = total_packets * packet_size_bytes
+            total_size_mb = total_size_bytes / (1024 * 1024)
+            
+            # Calculate 4KB packets
+            packets_4kb = math.ceil(total_size_bytes / 4096)
+            
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                 st.metric("4KB Packets Needed", f"{packets_4kb:,}", help="Number of 4KB blocks required to transmit total data.")
+            with c2:
+                st.metric("Total Packets (JSON)", f"{total_packets:,}")
+            with c3:
+                 st.metric("Packet Size", f"{packet_size_bytes} bytes")
+            with c4:
+                 st.metric("Total Transmission Size", f"{total_size_mb:.2f} MB")
+                 
+            with st.expander("View Sample JSON Packet", expanded=False):
+                st.code(json_str, language='json')
 
 
 
@@ -1345,21 +1639,21 @@ def main():
     with tab1:
         if check_table_exists(conn, 'sensor_data'):
             df_sensors = get_table_data(conn, 'sensor_data')
-            plot_sensor_data(df_sensors, show_quality)
+            plot_sensor_data(df_sensors, show_quality, show_mqtt_calc)
         else:
             st.warning("Sensor data table not found in database.")
     
     with tab2:
         if check_table_exists(conn, 'power_analyzer_data'):
             df_power = get_table_data(conn, 'power_analyzer_data')
-            plot_power_analyzer_data(df_power, show_quality)
+            plot_power_analyzer_data(df_power, show_quality, show_mqtt_calc)
         else:
             st.warning("Power analyzer data table not found in database.")
     
     with tab3:
         if check_table_exists(conn, 'tilt_data'):
             df_tilt = get_table_data(conn, 'tilt_data')
-            plot_tilt_data(df_tilt, show_quality)
+            plot_tilt_data(df_tilt, show_quality, show_mqtt_calc)
         else:
             st.warning("Tilt data table not found in database.")
 
