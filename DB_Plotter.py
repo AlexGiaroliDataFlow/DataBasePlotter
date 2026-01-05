@@ -454,7 +454,8 @@ def plot_sensor_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc
             if stats['success_rate'] < 95.0:
                  st.error(f"Issue detected with {col}: {stats['total_lost']} total lost packets.")
             
-            st.markdown("---") # Separator between sensors
+            if idx < len(valid_cols) - 1:
+                st.markdown("---") # Separator between sensors
         else:
             st.plotly_chart(fig, width="stretch", key=f"sensor_plot_{idx}")
 
@@ -787,7 +788,8 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
             if stats['success_rate'] < 95.0:
                   st.error(f"Issue detected with {col}: {stats['total_lost']} total lost packets.")
             
-            st.markdown("---")
+            if idx < len(plot_definitions) - 1:
+                st.markdown("---")
         else:
              st.plotly_chart(fig, width="stretch", key=f"power_plot_{idx}")
 
