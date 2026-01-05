@@ -140,6 +140,143 @@ def load_database(db_path: str) -> sqlite3.Connection:
     return sqlite3.connect(db_path)
 
 
+def analyze_transmission_quality(df: pd.DataFrame, time_col: str = 'datetime', column_name: str = None) -> tuple:
+    """
+    Analyze data transmission quality by detecting gaps.
+    
+    Args:
+        df: DataFrame containing the data.
+        time_col: Name of the time column.
+        column_name: (Optional) Specific column to check for local invalid values (NaN/Non-numeric).
+        
+    Returns:
+        (stats_dict, global_gaps_list, local_gaps_list)
+    """
+    stats = {
+        'expected': 0,
+        'actual': len(df),
+        'global_lost': 0,
+        'local_lost': 0,
+        'total_lost': 0,
+        'success_rate': 100.0
+    }
+    global_gaps = [] # Transmission gaps (missing packets)
+    local_gaps = []  # Sensor errors (invalid values in received packets)
+    
+    if df.empty:
+        return stats, global_gaps, local_gaps
+
+    # --- 1. Global Gap Detection (Transmission Loss) ---
+    # Try to use 'id' column for precise gap detection
+    if 'id' in df.columns and df['id'].is_unique:
+        df_sorted = df.sort_values('id')
+        ids = df_sorted['id'].values
+        times = df_sorted[time_col].values
+        
+        # Calculate diffs
+        id_diffs = np.diff(ids)
+        
+        # Where diff > 1, there is a gap
+        gap_indices = np.where(id_diffs > 1)[0]
+        
+        total_global_lost = 0
+        for idx in gap_indices:
+            start_id = ids[idx]
+            end_id = ids[idx+1]
+            lost_count = end_id - start_id - 1
+            total_global_lost += lost_count
+            
+            # Record global gap time range
+            global_gaps.append({
+                'start': times[idx],
+                'end': times[idx+1],
+                'count': lost_count,
+                'type': 'transmission_loss'
+            })
+            
+        stats['global_lost'] = total_global_lost
+        
+    else:
+        # Fallback to time-based detection
+        if time_col not in df.columns:
+            # Cannot detect gaps without time
+            return stats, global_gaps, local_gaps
+            
+        df_sorted = df.sort_values(time_col)
+        times = df_sorted[time_col].values
+        
+        # Calculate time diffs in seconds
+        time_diffs = np.diff(times).astype('timedelta64[ms]').astype(float) / 1000.0
+        
+        if len(time_diffs) > 0:
+            # Estimate expected interval (median)
+            median_interval = np.median(time_diffs)
+            if median_interval > 0:
+                # Threshold for gap (e.g., > 1.5x median)
+                gap_threshold = median_interval * 1.5
+                
+                gap_indices = np.where(time_diffs > gap_threshold)[0]
+                
+                total_global_lost = 0
+                for idx in gap_indices:
+                    gap_duration = time_diffs[idx]
+                    # Estimate lost packets
+                    lost_count = int(round(gap_duration / median_interval)) - 1
+                    if lost_count > 0:
+                        total_global_lost += lost_count
+                        global_gaps.append({
+                            'start': times[idx],
+                            'end': times[idx+1],
+                            'count': lost_count,
+                            'type': 'transmission_loss'
+                        })
+                stats['global_lost'] = total_global_lost
+    
+    # --- 2. Local Gap Detection (Sensor Faults) ---
+    if column_name and column_name in df.columns:
+        # Check for NaN or infinite values
+        # Convert to numeric first to be safe (coercing errors to NaN)
+        series = pd.to_numeric(df[column_name], errors='coerce')
+        
+        # Identify invalid indices
+        invalid_mask = series.isna()
+        local_lost_count = invalid_mask.sum()
+        stats['local_lost'] = int(local_lost_count)
+        
+        # Identify ranges/points of local loss for visualization
+        if local_lost_count > 0:
+            # We want to find contiguous blocks of NaNs to report as gaps, or individual points
+            # Get timestamps where data is invalid
+            invalid_times = df.loc[invalid_mask, time_col]
+            
+            for t in invalid_times:
+                 local_gaps.append({
+                    'start': t,
+                    'end': t, # Point gap
+                    'count': 1,
+                    'type': 'sensor_fault'
+                })
+
+    # --- 3. Final Stats ---
+    # Expected packets = Actual received + Global Lost
+    stats['expected'] = int(stats['actual']) + int(stats['global_lost'])
+    
+    # Total Lost = Global Lost (not received) + Local Lost (received but invalid)
+    # Note: 'Actual' includes the 'Local Lost' rows because they exist in the DB.
+    # So valid packets = Actual - Local Lost
+    # Success Rate = Valid Packets / Total Expected
+    
+    valid_packets = stats['actual'] - stats['local_lost']
+    stats['total_lost'] = stats['global_lost'] + stats['local_lost']
+    
+    if stats['expected'] > 0:
+        stats['success_rate'] = (valid_packets / stats['expected']) * 100.0
+        
+    return stats, global_gaps, local_gaps
+
+
+
+
 def get_table_data(conn: sqlite3.Connection, table_name: str) -> pd.DataFrame:
     """Load data from a table into a DataFrame."""
     try:
@@ -182,7 +319,9 @@ def create_date_range_slider(df: pd.DataFrame, key_prefix: str):
     mask = (df['datetime'] >= date_range[0]) & (df['datetime'] <= date_range[1])
     return df[mask].copy(), 'datetime'
 
-def plot_sensor_data(df: pd.DataFrame):
+
+def plot_sensor_data(df: pd.DataFrame, show_quality: bool = True):
+
     """Create interactive time series plots for sensor data."""
     if df.empty:
         st.warning("No sensor data available.")
@@ -211,19 +350,12 @@ def plot_sensor_data(df: pd.DataFrame):
         st.warning("No valid data in selected range.")
         return
 
-    # Create subplots sharing x-axis
-    num_plots = len(valid_cols)
-    fig = make_subplots(
-        rows=num_plots, 
-        cols=1, 
-        shared_xaxes=True,
-        vertical_spacing=0.05,
-        subplot_titles=[col.replace('_', ' ').title() for col in valid_cols]
-    )
-    
+    # Create individual plots for each sensor
     for idx, col in enumerate(valid_cols):
-        row_num = idx + 1
         line_color = PASTEL_COLORS[idx % len(PASTEL_COLORS)]
+        
+        # Create separate figure
+        fig = go.Figure()
         
         # Trace 1: Raw Data
         fig.add_trace(go.Scatter(
@@ -231,11 +363,10 @@ def plot_sensor_data(df: pd.DataFrame):
             y=df_filtered[col],
             mode='lines',
             name=col,
-            legendgroup=col,
             line=dict(color=line_color, width=1),
-            opacity=0.5,
+            opacity=0.7,
             hovertemplate=f'{col}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
-        ), row=row_num, col=1)
+        ))
         
         # Calculate Moving Average
         window_size = max(10, len(df_filtered) // 50)
@@ -247,26 +378,88 @@ def plot_sensor_data(df: pd.DataFrame):
             y=col_avg,
             mode='lines',
             name=f'{col} Avg',
-            legendgroup=col,
-            line=dict(color=line_color, width=2),
+            line=dict(color=line_color, width=2.5),
             hovertemplate=f'{col} Avg: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
-        ), row=row_num, col=1)
+        ))
         
-        # Update y-axis label
-        fig.update_yaxes(title_text=col, row=row_num, col=1)
+        fig.update_layout(
+            title=col.replace('_', ' ').title(),
+            height=300,
+            margin=dict(l=20, r=20, t=40, b=20),
+            showlegend=True,
+            hovermode='x unified',
+            yaxis_title=col
+        )
 
-    fig.update_layout(
-        height=300 * num_plots,
-        margin=dict(l=20, r=20, t=40, b=20),
-        showlegend=False,
-        hovermode='x unified',
-        title_text="Sensor Data Analysis"
-    )
-    
-    st.plotly_chart(fig, width="stretch")
+        # Transmission Quality Analysis per sensor
+        if show_quality:
+            stats, global_gaps, local_gaps = analyze_transmission_quality(df_filtered, x_axis, column_name=col)
+            
+            # 1. Visualize Global Gaps (Transmission Loss) - Full Height Red Zones
+            for gap in global_gaps:
+                fig.add_vrect(
+                    x0=gap['start'],
+                    x1=gap['end'],
+                    fillcolor="red",
+                    opacity=0.1,
+                    layer="below",
+                    line_width=0
+                )
+                fig.add_annotation(
+                    x=gap['start'],
+                    y=1,
+                    yref="paper",
+                    text="No Signal",
+                    showarrow=False,
+                    xanchor="left",
+                    yanchor="top",
+                    font=dict(size=8, color="red")
+                )
+            
+            # 2. Visualize Local Gaps (Sensor Faults) - Markers or specific indications
+            # Since local gaps are specific points (or ranges) where data exists but is invalid
+            if local_gaps:
+                # Collect timestamps
+                fault_times = [g['start'] for g in local_gaps]
+                # Determine Y position (use min of data or 0)
+                y_pos = df_filtered[col].min() if not pd.isna(df_filtered[col].min()) else 0
+                
+                fig.add_trace(go.Scatter(
+                    x=fault_times,
+                    y=[y_pos] * len(fault_times), 
+                    mode='markers',
+                    marker=dict(symbol='x', color='orange', size=8),
+                    name='Invalid Value',
+                    hoverinfo='skip'
+                ))
 
 
-def plot_power_analyzer_data(df: pd.DataFrame):
+            st.plotly_chart(fig, width="stretch", key=f"sensor_plot_{idx}")
+            
+            # Metrics Row
+            m1, m2, m3, m4, m5 = st.columns(5)
+            with m1:
+                st.metric("Success Rate", f"{stats['success_rate']:.2f}%")
+            with m2:
+                st.metric("Valid Packets", stats['actual'] - stats['local_lost'])
+            with m3:
+                st.metric("Transmission Loss", stats['global_lost'], help="Packets not received (network gap)")
+            with m4:
+                st.metric("Sensor Faults", stats['local_lost'], help="Packets received but value is invalid (NaN/Text)")
+            with m5:
+                st.metric("Total Expected", stats['expected'])
+                
+            if stats['success_rate'] < 95.0:
+                 st.error(f"Issue detected with {col}: {stats['total_lost']} total lost packets.")
+            
+            st.markdown("---") # Separator between sensors
+        else:
+            st.plotly_chart(fig, width="stretch", key=f"sensor_plot_{idx}")
+
+
+
+def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True):
+
     """Create interactive time series plots for power analyzer data."""
     if df.empty:
         st.warning("No power analyzer data available.")
@@ -346,20 +539,41 @@ def plot_power_analyzer_data(df: pd.DataFrame):
 
     num_plots = len(plot_definitions)
     
-    # Create one giant figure for synchronization
-    fig = make_subplots(
-        rows=num_plots,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.02,
-        subplot_titles=[d['col'] for d in plot_definitions] 
-    )
+    # Add transmission quality visualization
+    if show_quality:
+        # Use first col of group as proxy for 'local' checks if we want, or just global. 
+        # For grouped plots, specific local faults might be messy. Let's stick to global gaps primarily, 
+        # and maybe check the FIRST column of the group for local faults as a representative?
+        # A safer bet is just Global Gaps for the big plots, but the user asked for "valid value" checks.
+        # Let's check ALL columns in the group. If ANY is invalid, mark it?
+        # Simple approach: Check the primary column (first one) for local quality.
+        
+        # Actually, grouped plots display multiple lines. Let's just track global gaps for the whole group (missing rows)
+        # And if specific columns have NaNs, we can't easily show 5 different stats rows.
+        # So for Power Analyzer (which is grouped), we will only show Global Gaps and a generic success rate.
+        # OR we can iterate per plot definition like sensors. 
+        # Given "apply similar logic", let's Refactor Power Analyzer to be Iterate-based too!
+        
+        # Wait, Power Analyzer has Grouped plots (Currents together, Voltages together).
+        # We can keep them grouped but show stats below each GROUP.
+        pass
+
+    # REFACTORING Power Analyzer Loop to render chart + stats individually per GROUP
     
     for idx, definition in enumerate(plot_definitions):
-        col = definition['col']
+        col = definition['col'] # This was for single-col loop, but wait...
+        # The previous code logic was: plot_definitions had one entry per COLUMN, but they were all added to ONE make_subplots figure.
+        # We want to break that figure apart.
+        
+        # Re-creating the figure for just THIS column (or group?)
+        # The 'groups' logic in previous code was just to select columns. 
+        # But 'plot_definitions' flattened it into a list of columns to plot in order.
+        # So essentially it WAS plotting one column per subplot row.
+        # So we can just make individual charts! Perfect.
+        
         row_num = idx + 1
         
-        # Determine unit label
+         # Determine unit label
         if col in power_cols_kilo:
             if col == 'Psys':
                 unit = 'kW'
@@ -373,17 +587,19 @@ def plot_power_analyzer_data(df: pd.DataFrame):
             
         line_color = PASTEL_COLORS[idx % len(PASTEL_COLORS)]
         
+        # New Figure
+        fig = go.Figure()
+
         # Trace 1: Raw
         fig.add_trace(go.Scatter(
             x=df_filtered[x_axis],
             y=df_filtered[col],
             mode='lines',
             name=col,
-            legendgroup=col,
             line=dict(color=line_color, width=1),
-            opacity=0.5,
+            opacity=0.7,
             hovertemplate=f'{col}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
-        ), row=row_num, col=1)
+        ))
         
         # Calculate Moving Average
         window_size = max(10, len(df_filtered) // 50)
@@ -395,26 +611,88 @@ def plot_power_analyzer_data(df: pd.DataFrame):
             y=col_avg,
             mode='lines',
             name=f'{col} Avg',
-            legendgroup=col,
-            line=dict(color=line_color, width=2),
+            line=dict(color=line_color, width=2.5),
             hovertemplate=f'{col} Avg: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
-        ), row=row_num, col=1)
+        ))
         
-        # Update y-axis label
-        fig.update_yaxes(title_text=y_label, row=row_num, col=1)
+        group_title = definition['group']
+        # Maybe use Group + Col name
+        
+        fig.update_layout(
+             title=f"{col} ({group_title})",
+             height=300,
+             margin=dict(l=20, r=20, t=40, b=20),
+             showlegend=True,
+             hovermode='x unified',
+             yaxis_title=y_label
+        )
+        
+         # Transmission Quality
+        if show_quality:
+            stats, global_gaps, local_gaps = analyze_transmission_quality(df_filtered, x_axis, column_name=col)
+            
+            # Global Gaps
+            for gap in global_gaps:
+                fig.add_vrect(
+                    x0=gap['start'],
+                    x1=gap['end'],
+                    fillcolor="red",
+                    opacity=0.1,
+                    layer="below",
+                    line_width=0
+                )
+                fig.add_annotation(
+                    x=gap['start'],
+                    y=1,
+                    yref="paper",
+                    text="No Signal",
+                    showarrow=False,
+                    xanchor="left",
+                    yanchor="top",
+                    font=dict(size=8, color="red")
+                )
+            
+            # Local Gaps
+            if local_gaps:
+                fault_times = [g['start'] for g in local_gaps]
+                y_pos = df_filtered[col].min() if not pd.isna(df_filtered[col].min()) else 0
+                
+                fig.add_trace(go.Scatter(
+                    x=fault_times,
+                    y=[y_pos] * len(fault_times), 
+                    mode='markers',
+                    marker=dict(symbol='x', color='orange', size=8),
+                    name='Invalid Value',
+                    hoverinfo='skip'
+                ))
 
-    fig.update_layout(
-        height=300 * num_plots,
-        margin=dict(l=20, r=20, t=40, b=20),
-        showlegend=False,
-        hovermode='x unified',
-        title_text="Power Analyzer Data Analysis"
-    )
-    
-    st.plotly_chart(fig, width="stretch")
+
+            st.plotly_chart(fig, width="stretch", key=f"power_plot_{idx}")
+            
+             # Metrics
+            m1, m2, m3, m4, m5 = st.columns(5)
+            with m1:
+                st.metric("Success Rate", f"{stats['success_rate']:.2f}%")
+            with m2:
+                st.metric("Valid Packets", stats['actual'] - stats['local_lost'])
+            with m3:
+                st.metric("Transmission Loss", stats['global_lost'])
+            with m4:
+                st.metric("Sensor Faults", stats['local_lost'])
+            with m5:
+                st.metric("Total Expected", stats['expected'])
+                
+            if stats['success_rate'] < 95.0:
+                  st.error(f"Issue detected with {col}: {stats['total_lost']} total lost packets.")
+            
+            st.markdown("---")
+        else:
+             st.plotly_chart(fig, width="stretch", key=f"power_plot_{idx}")
 
 
-def plot_tilt_data(df: pd.DataFrame):
+
+def plot_tilt_data(df: pd.DataFrame, show_quality: bool = True):
+
     """Create interactive time series plot for tilt data."""
     if df.empty:
         st.warning("No tilt data available.")
@@ -465,7 +743,68 @@ def plot_tilt_data(df: pd.DataFrame):
         hovermode='x unified'
     )
     
-    st.plotly_chart(fig, width="stretch")
+    # Add transmission quality visualization
+    if show_quality:
+        # Check purely based on gaps + local validity of tilt_angle
+        stats, global_gaps, local_gaps = analyze_transmission_quality(df_filtered, x_axis, column_name='tilt_angle')
+        
+        # Add global gaps
+        for gap in global_gaps:
+            fig.add_vrect(
+                x0=gap['start'],
+                x1=gap['end'],
+                fillcolor="red",
+                opacity=0.1,
+                layer="below",
+                line_width=0
+            )
+            fig.add_annotation(
+                x=gap['start'],
+                y=1,
+                yref="paper",
+                text="No Signal",
+                showarrow=False,
+                xanchor="left",
+                yanchor="top",
+                font=dict(size=8, color="red")
+            )
+        
+        # Add local gaps (invalid tilt values)
+        if local_gaps:
+            fault_times = [g['start'] for g in local_gaps]
+            y_pos = df_filtered['tilt_angle'].min() if not pd.isna(df_filtered['tilt_angle'].min()) else 0
+            
+            fig.add_trace(go.Scatter(
+                x=fault_times,
+                y=[y_pos] * len(fault_times),
+                mode='markers',
+                marker=dict(symbol='x', color='orange', size=8),
+                name='Invalid Value',
+                hoverinfo='skip'
+            ))
+
+            
+        st.plotly_chart(fig, width="stretch")
+
+        # Show stats metrics
+        m1, m2, m3, m4, m5 = st.columns(5)
+        with m1:
+            st.metric("Success Rate", f"{stats['success_rate']:.2f}%")
+        with m2:
+            st.metric("Valid Packets", stats['actual'] - stats['local_lost'])
+        with m3:
+            st.metric("Transmission Loss", stats['global_lost'])
+        with m4:
+            st.metric("Sensor Faults", stats['local_lost'])
+        with m5:
+            st.metric("Total Expected", stats['expected'])
+            
+        if stats['success_rate'] < 95.0:
+             st.error(f"Low quality detected: {stats['success_rate']:.2f}%")
+    else:            
+        st.plotly_chart(fig, width="stretch")
+
+
 
 
 def plot_fft_data(df: pd.DataFrame):
@@ -919,7 +1258,13 @@ def main():
         selected_db = None
         db_path = None
     
+    # Transmission Quality Toggle
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Analysis Settings")
+    show_quality = st.sidebar.toggle("Show Transmission Quality", value=True, help="Highlight missing data and show success rate.")
+    
     # File uploader for custom database
+
     st.sidebar.markdown("---")
     st.sidebar.subheader("Upload a Database")
     uploaded_file = st.sidebar.file_uploader(
@@ -960,23 +1305,24 @@ def main():
     with tab1:
         if check_table_exists(conn, 'sensor_data'):
             df_sensors = get_table_data(conn, 'sensor_data')
-            plot_sensor_data(df_sensors)
+            plot_sensor_data(df_sensors, show_quality)
         else:
             st.warning("Sensor data table not found in database.")
     
     with tab2:
         if check_table_exists(conn, 'power_analyzer_data'):
             df_power = get_table_data(conn, 'power_analyzer_data')
-            plot_power_analyzer_data(df_power)
+            plot_power_analyzer_data(df_power, show_quality)
         else:
             st.warning("Power analyzer data table not found in database.")
     
     with tab3:
         if check_table_exists(conn, 'tilt_data'):
             df_tilt = get_table_data(conn, 'tilt_data')
-            plot_tilt_data(df_tilt)
+            plot_tilt_data(df_tilt, show_quality)
         else:
             st.warning("Tilt data table not found in database.")
+
     
     with tab4:
         if check_table_exists(conn, 'fft_data'):
