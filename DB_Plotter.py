@@ -1849,7 +1849,7 @@ def display_combined_mqtt_simulation(df_sensor, cols_sensor, df_tilt, cols_tilt,
 
 def main():
     """Main application function."""
-    st.markdown('<h1 class="main-header">Flowsense database plotter</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">Flowsense database analyzer</h1>', unsafe_allow_html=True)
     
     # Sidebar logo
     logo_path = Path(__file__).parent / "Data-Flow Logo PNG.png"
