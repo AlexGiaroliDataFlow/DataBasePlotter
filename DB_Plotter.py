@@ -960,40 +960,6 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
     fft_tab1, fft_tab2, fft_tab3 = st.tabs(["FFT", "FFT in Time", "Advanced Analysis"])
     
     with fft_tab1:
-        # Transmission Quality Analysis
-        if show_quality:
-            st.subheader("Transmission Quality")
-            # Ensure we have a time column or ID for analysis
-            time_col = 'datetime'
-            if 'datetime' not in df.columns:
-                # Try to use unix_start if available
-                if 'unix_start' in df.columns:
-                     df['datetime'] = pd.to_datetime(df['unix_start'], unit='s')
-                elif 'unix_timestamp' in df.columns:
-                     df['datetime'] = pd.to_datetime(df['unix_timestamp'], unit='s')
-            
-            # Use 'max_amplitude_g' for local validity check if available
-            check_col = 'max_amplitude_g' if 'max_amplitude_g' in df.columns else None
-            
-            stats, global_gaps, local_gaps = analyze_transmission_quality(df, time_col, column_name=check_col)
-            
-            m1, m2, m3, m4, m5 = st.columns(5)
-            with m1:
-                st.metric("Success Rate", f"{stats['success_rate']:.2f}%")
-            with m2:
-                st.metric("Valid Packets", stats['actual'] - stats['local_lost'])
-            with m3:
-                st.metric("Transmission Loss", stats['global_lost'], help="Packets not received (network gap)")
-            with m4:
-                st.metric("Sensor Faults", stats['local_lost'], help="Packets received but value is invalid")
-            with m5:
-                st.metric("Total Expected", stats['expected'])
-                
-            if stats['success_rate'] < 95.0:
-                 st.error(f"Issue detected with FFT Data: {stats['total_lost']} total lost packets.")
-            
-            st.markdown("---")
-
         # Build dropdown options with metadata
         # Format: axis, amplitude (G), type, Number of points, interval of analysis
         dropdown_options = []
@@ -1519,6 +1485,39 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             )
             st.plotly_chart(fig_energy, width="stretch", key="energy_bands")
 
+    # Transmission Quality Analysis at the bottom
+    if show_quality:
+        st.markdown("---")
+        st.subheader("Transmission Quality")
+        # Ensure we have a time column or ID for analysis
+        time_col = 'datetime'
+        if 'datetime' not in df.columns:
+            # Try to use unix_start if available
+            if 'unix_start' in df.columns:
+                 df['datetime'] = pd.to_datetime(df['unix_start'], unit='s')
+            elif 'unix_timestamp' in df.columns:
+                 df['datetime'] = pd.to_datetime(df['unix_timestamp'], unit='s')
+        
+        # Use 'max_amplitude_g' for local validity check if available
+        check_col = 'max_amplitude_g' if 'max_amplitude_g' in df.columns else None
+        
+        stats, global_gaps, local_gaps = analyze_transmission_quality(df, time_col, column_name=check_col)
+        
+        m1, m2, m3, m4, m5 = st.columns(5)
+        with m1:
+            st.metric("Success Rate", f"{stats['success_rate']:.2f}%")
+        with m2:
+            st.metric("Valid Packets", stats['actual'] - stats['local_lost'])
+        with m3:
+            st.metric("Transmission Loss", stats['global_lost'], help="Packets not received (network gap)")
+        with m4:
+            st.metric("Sensor Faults", stats['local_lost'], help="Packets received but value is invalid")
+        with m5:
+            st.metric("Total Expected", stats['expected'])
+            
+        if stats['success_rate'] < 95.0:
+             st.error(f"Issue detected with FFT Data: {stats['total_lost']} total lost packets.")
+
 
 def plot_gps_data(df: pd.DataFrame):
     """Display GPS data on an interactive map."""
@@ -1956,7 +1955,6 @@ def main():
                         key="percentile_slider",
                         label_visibility="collapsed"
                     )
-
 
 
     
