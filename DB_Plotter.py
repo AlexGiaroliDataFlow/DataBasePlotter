@@ -970,6 +970,17 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
         st.warning("No FFT columns found.")
         return
     
+    # Determine number_of_points from first row (can be 500 or 1000)
+    # This value will be used for X-axis scaling in all FFT pages
+    default_num_points = len(fft_cols)
+    if 'number_of_points' in df.columns and not df['number_of_points'].dropna().empty:
+        first_row_points = df['number_of_points'].iloc[0]
+        if pd.notna(first_row_points):
+            default_num_points = int(first_row_points)
+    
+    # Store for use throughout the function
+    fft_num_points = default_num_points
+    
     # Create subtabs
     fft_tab1, fft_tab2, fft_tab3 = st.tabs(["FFT", "FFT in Time", "Advanced Analysis"])
     
@@ -1019,9 +1030,10 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
         def plot_fft_comparison(primary_idx: int, comparison_idx: int = None, update_global_stats: bool = False):
             # --- Primary Data ---
             row = df.iloc[primary_idx]
-            num_points = row.get('number_of_points', len(fft_cols))
-            fft_values = [row[col] for col in fft_cols if pd.notna(row[col])]
-            frequencies = np.arange(len(fft_values))
+            num_points = row.get('number_of_points', fft_num_points)
+            # Use fft_num_points (from first row) for X-axis, limit values to that range
+            fft_values = [row[col] for col in fft_cols[:fft_num_points] if pd.notna(row[col])]
+            frequencies = np.arange(fft_num_points)
             
             # --- Comparison Data ---
             comp_row = None
@@ -1327,15 +1339,8 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             y_labels = []
             
             # Determine Frequency Axis for Heatmap
-            # User requirement: Always 1Hz resolution, index = frequency
-            
-            # Determine max points based on number_of_points
-            max_freq_points = len(fft_cols)
-            if 'number_of_points' in df_hm.columns and not df_hm['number_of_points'].dropna().empty:
-                 max_freq_points = int(df_hm['number_of_points'].max())
-            
-            # Ensure we don't go out of bounds
-            max_freq_points = min(max_freq_points, len(fft_cols))
+            # Use fft_num_points (determined from first row of fft_data table)
+            max_freq_points = min(fft_num_points, len(fft_cols))
             
             freqs_hm = np.arange(max_freq_points)
             cols_hm = fft_cols[:max_freq_points]
@@ -1456,13 +1461,21 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             timestamps = []
             spectra = []
             
-            # Calculate Frequencies for first row
-            # User requirement: Always 1Hz resolution, index = frequency
-            freqs_adv = np.arange(len(fft_cols))
+            # Use fft_num_points (determined from first row of fft_data table) for frequency axis
+            freqs_adv = np.arange(min(fft_num_points, len(fft_cols)))
             hz_per_bin = 1.0
             
+            # Calculate default values for energy bands based on number_of_points
+            # For 500 points: Low = 100Hz, Medium = 250Hz
+            # For 1000 points: Low = 200Hz, Medium = 500Hz
+            default_low_band = int(fft_num_points * 0.2)   # 20% of max frequency
+            default_med_band = int(fft_num_points * 0.5)   # 50% of max frequency
+            
+            # Limit columns to the frequency range determined by fft_num_points
+            cols_adv = fft_cols[:min(fft_num_points, len(fft_cols))]
+            
             for idx, row in df_adv.iterrows():
-                vals = [row[col] if pd.notna(row[col]) else 0 for col in fft_cols]
+                vals = [row[col] if pd.notna(row[col]) else 0 for col in cols_adv]
                 spectra.append(vals)
                 ts = row.get('human_interval_of_analysis', f'Sample {idx}')
                 timestamps.append(str(ts))
@@ -1510,24 +1523,29 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             
             col_b1, col_b2 = st.columns(2)
             with col_b1:
-                low_band_max = st.number_input("Low Band Max (Hz)", value=200, step=10)
+                low_band_max = st.number_input("Low Band Max (Hz)", value=default_low_band, step=10)
             with col_b2:
-                med_band_max = st.number_input("Medium Band Max (Hz)", value=1000, step=50)
+                med_band_max = st.number_input("Medium Band Max (Hz)", value=default_med_band, step=50)
                 
             # Convert Hz thresholds to indices
             low_idx = int(low_band_max / hz_per_bin)
             med_idx = int(med_band_max / hz_per_bin)
             
-            # Clamp indices
-            low_idx = min(max(0, low_idx), len(fft_cols))
-            med_idx = min(max(low_idx, med_idx), len(fft_cols))
+            # Clamp indices to the frequency range
+            max_freq_idx = len(freqs_adv)
+            low_idx = min(max(0, low_idx), max_freq_idx)
+            med_idx = min(max(low_idx, med_idx), max_freq_idx)
             
             # Calculate energies
             energies = []
             for spec in spectra:
-                low_energy = sum(spec[:low_idx])
-                med_energy = sum(spec[low_idx:med_idx])
-                high_energy = sum(spec[med_idx:])
+                # Ensure indices don't exceed spectrum length
+                spec_len = len(spec)
+                l_idx = min(low_idx, spec_len)
+                m_idx = min(med_idx, spec_len)
+                low_energy = sum(spec[:l_idx])
+                med_energy = sum(spec[l_idx:m_idx])
+                high_energy = sum(spec[m_idx:])
                 energies.append({
                     'Low Band': low_energy,
                     'Medium Band': med_energy,
