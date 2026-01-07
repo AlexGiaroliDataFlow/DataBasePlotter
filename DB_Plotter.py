@@ -1025,7 +1025,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             axis = row.get('axis', 'N/A')  # X, Y, or Z
             max_amplitude = row.get('max_amplitude_g', 'N/A')  # Amplitude in G
             fft_type = row.get('type', 'N/A')  # acceleration or velocity
-            num_points = row.get('number_of_points', len(fft_cols))
+            num_points = int(row.get('number_of_points', len(fft_cols)))
             interval = row.get('human_interval_of_analysis', 'N/A')
             
             # Format amplitude
@@ -1100,7 +1100,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 y=fft_values,
                 name="Primary",
                 marker_color=primary_colors,
-                hovertemplate='<b>Primary</b><br>Freq: %{x:.1f} Hz<br>Amp: %{y:.4f}<extra></extra>'
+                hovertemplate='<b>Primary</b><br>Freq: %{x:.0f} Hz<br>Amp: %{y:.4f}<extra></extra>'
             ))
 
             # --- Comparison Colors ---
@@ -1115,7 +1115,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     y=comp_fft_values,
                     name="Comparison",
                     marker_color=comp_colors,
-                    hovertemplate='<b>Comparison</b><br>Freq: %{x:.1f} Hz<br>Amp: %{y:.4f}<extra></extra>'
+                    hovertemplate='<b>Comparison</b><br>Freq: %{x:.0f} Hz<br>Amp: %{y:.4f}<extra></extra>'
                 ))
 
             # Add horizontal line for primary percentile
@@ -1156,7 +1156,8 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     y=1.02,
                     xanchor="right",
                     x=1
-                )
+                ),
+                hovermode='x unified'
             )
             
             st.plotly_chart(fig, key=f"fft_plot_combined", width="stretch")
@@ -1402,7 +1403,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     len=0.8,
                     ticks='outside'
                 ),
-                hovertemplate='Frequency: %{x:.1f} Hz<br>Time: %{y}<br>Amplitude: %{z:.4f}<extra></extra>'
+                hovertemplate='Frequency: %{x:.0f} Hz<br>Time: %{y}<br>Amplitude: %{z:.4f}<extra></extra>'
             ))
             
             fig.update_layout(
