@@ -52,14 +52,14 @@ st.markdown("""
 
     /* --- Main Tabs Specific Colors --- */
     
-    /* Tab 1: Sensors - Pastel Blue */
+    /* Tab 1: Sensors - Pastel Yellow */
     .stTabs [data-baseweb="tab-list"] button:nth-of-type(1)[aria-selected="true"] {
-        background-color: #5DADE2 !important;
-        color: white !important;
+        background-color: #F4D03F !important;
+        color: black !important;
     }
     /* Hover Effect for Tab 1 (Unselected) */
     .stTabs [data-baseweb="tab-list"] button:nth-of-type(1):not([aria-selected="true"]):hover {
-        color: #5DADE2 !important;
+        color: #F4D03F !important;
     }
     
     /* Tab 2: Power Analyzer - Vivid Orange */
@@ -72,14 +72,14 @@ st.markdown("""
         color: #E67E22 !important;
     }
     
-    /* Tab 3: FFT - Pastel Yellow */
+    /* Tab 3: FFT - Pastel Blue */
     .stTabs [data-baseweb="tab-list"] button:nth-of-type(3)[aria-selected="true"] {
-        background-color: #F4D03F !important;
-        color: black !important;
+        background-color: #5DADE2 !important;
+        color: white !important;
     }
     /* Hover Effect for Tab 3 (Unselected) */
     .stTabs [data-baseweb="tab-list"] button:nth-of-type(3):not([aria-selected="true"]):hover {
-        color: #F4D03F !important;
+        color: #5DADE2 !important;
     }
     
     /* Tab 4: GPS - Pastel Green */
@@ -94,14 +94,14 @@ st.markdown("""
 
     /* --- Nested/Sub Tabs (FFT) --- */
     /* This target allows styling subtabs inside any parent tab container to match the parent if needed.
-       Since we only have subtabs in FFT, we force them to match FFT's Yellow. */
+       Since we only have subtabs in FFT, we force them to match FFT's now Blue theme. */
     .stTabs .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
-        background-color: #F4D03F !important;
-        color: black !important;
+        background-color: #5DADE2 !important;
+        color: white !important;
     }
-    /* Subtab Hover - also yellow */
+    /* Subtab Hover - also Blue */
     .stTabs .stTabs [data-baseweb="tab-list"] button:not([aria-selected="true"]):hover {
-        color: #F4D03F !important;
+        color: #5DADE2 !important;
     }
 
     /* Hide red indicator under tabs */
@@ -124,10 +124,10 @@ EXCLUDE_METADATA_COLS = ['id_day', 'id', 'status', 'human_timestamp', 'unix_time
 
 # Vivid pastel color palette (more saturated)
 PASTEL_COLORS = [
-    '#5DADE2',  # vivid blue
+    '#F4D03F',  # vivid yellow (swapped from idx 3)
     '#E74C3C',  # vivid red
     '#58D68D',  # vivid green
-    '#F4D03F',  # vivid yellow
+    '#5DADE2',  # vivid blue (swapped from idx 0)
     '#AF7AC5',  # vivid purple
     '#E67E22',  # vivid orange
     '#3498DB',  # strong blue
@@ -1056,10 +1056,10 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             fig = go.Figure()
 
             # --- Primary Colors ---
-            primary_colors = PASTEL_COLORS[0]
+            primary_colors = PASTEL_COLORS[3]
             if show_mqtt_calc:
                 darker_blue = '#2874A6'
-                primary_colors = [darker_blue if v > primary_threshold else PASTEL_COLORS[0] for v in fft_values]
+                primary_colors = [darker_blue if v > primary_threshold else PASTEL_COLORS[3] for v in fft_values]
 
             # Plot Primary
             fig.add_trace(go.Bar(
@@ -1090,7 +1090,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 fig.add_hline(
                     y=primary_threshold,
                     line_dash="dot",
-                    line_color=PASTEL_COLORS[0],
+                    line_color=PASTEL_COLORS[3],
                     annotation_text=f"Primary {percentile_value}th: {primary_threshold:.4f}",
                     annotation_position="top right"
                 )
@@ -1169,7 +1169,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     p_val_str = f"{int(stats_prim[key])}" if key == 'peaks_count' else f"{stats_prim[key]:.4f}"
                     
                     # Primary
-                    st.markdown(f"<div style='color:{PASTEL_COLORS[0]}; font-size:2.8rem; line-height:1.2;'>{p_val_str}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='color:{PASTEL_COLORS[3]}; font-size:2.8rem; line-height:1.2;'>{p_val_str}</div>", unsafe_allow_html=True)
                     
                     # Comparison
                     if stats_comp:
@@ -1210,7 +1210,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     # Primary
                     if i < len(p_peaks):
                         p_idx = p_peaks[i]
-                        st.markdown(f"<div style='color:{PASTEL_COLORS[0]}; font-size:1.8rem; line-height:1.2;'>{int(frequencies[p_idx])} Hz<br><span style='font-size:1.1rem; opacity:0.8;'>({fft_values[p_idx]:.3f})</span></div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='color:{PASTEL_COLORS[3]}; font-size:1.8rem; line-height:1.2;'>{int(frequencies[p_idx])} Hz<br><span style='font-size:1.1rem; opacity:0.8;'>({fft_values[p_idx]:.3f})</span></div>", unsafe_allow_html=True)
                     else:
                          st.markdown("-")
                     
