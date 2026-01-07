@@ -808,11 +808,10 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
         with c4:
              st.metric("Total Transmission Size", f"{total_size_mb:.2f} MB")
              
-        with st.expander("View Json packet", expanded=False):
-            st.code(full_json_sequence, language='json')
-
-
-
+        with st.expander("View Json packet (first 10 rows)", expanded=False):
+            # Show just the first 10 packets for preview
+            preview_json_sequence = "\n".join([json.dumps(p, separators=(',', ':'), allow_nan=True) for p in all_payloads_power[:10]])
+            st.code(preview_json_sequence, language='json')
 
 def plot_tilt_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = True, show_mqtt_calc: bool = True):
     """Create interactive time series plot for tilt data."""
@@ -1577,10 +1576,10 @@ def display_combined_mqtt_simulation(df_sensor, cols_sensor, df_tilt, cols_tilt,
     with c4:
             st.metric("Total Transmission Size", f"{total_size_mb:.2f} MB")
             
-    with st.expander("View Json packet", expanded=False):
-        # Join all as separate lines for readability of "all packets"
-        full_json_sequence = "\n".join([json.dumps(p, separators=(',', ':'), allow_nan=True) for p in all_payloads])
-        st.code(full_json_sequence, language='json')
+    with st.expander("View Json packet (first 10 rows)", expanded=False):
+        # Join first 10 as separate lines for preview
+        preview_json_sequence = "\n".join([json.dumps(p, separators=(',', ':'), allow_nan=True) for p in all_payloads[:10]])
+        st.code(preview_json_sequence, language='json')
 
 
 def main():
