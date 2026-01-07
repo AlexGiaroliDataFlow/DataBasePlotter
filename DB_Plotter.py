@@ -1038,6 +1038,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
         # Helper function to plot a single FFT
         def plot_single_fft(selected_idx: int, key_suffix: str, title_prefix: str, update_global_stats: bool = False):
             row = df.iloc[selected_idx]
+            num_points = row.get('number_of_points', len(fft_cols))
             
             # Extract FFT values
             fft_values = [row[col] for col in fft_cols if pd.notna(row[col])]
@@ -1098,26 +1099,19 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             ground_values = [val for val in fft_values if val <= percentile_threshold]
             ground_average = sum(ground_values) / len(ground_values) if ground_values else 0
             
+            num_metrics = 5 if show_mqtt_calc else 4
+            m_cols = st.columns(num_metrics)
+            with m_cols[0]:
+                st.metric("Max Amplitude", f"{max(fft_values):.4f}")
+            with m_cols[1]:
+                st.metric("Min Amplitude", f"{min(fft_values):.4f}")
+            with m_cols[2]:
+                st.metric("Mean Amplitude", f"{sum(fft_values)/len(fft_values):.4f}")
+            with m_cols[3]:
+                st.metric("Ground Average", f"{ground_average:.4f}")
             if show_mqtt_calc:
-                col1, col2, col3, col4, col5 = st.columns(5)
-                with col1:
-                    st.metric("Max Amplitude", f"{max(fft_values):.4f}")
-                with col2:
-                    st.metric("Min Amplitude", f"{min(fft_values):.4f}")
-                with col3:
-                    st.metric("Mean Amplitude", f"{sum(fft_values)/len(fft_values):.4f}")
-                with col4:
-                    st.metric("Ground Average", f"{ground_average:.4f}")
-                with col5:
+                with m_cols[4]:
                     st.metric(f"Peaks > {percentile_value}th", peaks_above)
-            else:
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Max Amplitude", f"{max(fft_values):.4f}")
-                with col2:
-                    st.metric("Min Amplitude", f"{min(fft_values):.4f}")
-                with col3:
-                    st.metric("Mean Amplitude", f"{sum(fft_values)/len(fft_values):.4f}")
                 
             if show_mqtt_calc:
                 # Construct optimized payload
@@ -1136,7 +1130,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 
                 payload = {
                     "type": "acc" if row.get('type') == 'acceleration' else ("vel" if row.get('type') == 'velocity' else row.get('type', 'N/A')),
-                    "points": int(n_points_meta),
+                    "points": int(num_points),
                     "axis": row.get('axis', 'N/A'),
                     "ts": ts_val,
                     "avg": round(ground_average, 2),
@@ -1145,6 +1139,41 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 
                 json_str = json.dumps(payload, separators=(',', ':'))
                 payload_size = len(json_str)
+
+            # --- Top 5 Peaks Display ---
+            fft_np = np.array(fft_values)
+            local_max_indices = []
+            
+            if len(fft_np) >= 3:
+                # Find local maxima
+                for i in range(1, len(fft_np) - 1):
+                    if fft_np[i] > fft_np[i-1] and fft_np[i] > fft_np[i+1]:
+                        local_max_indices.append(i)
+                # Check endpoints
+                if fft_np[0] > fft_np[1]: local_max_indices.append(0)
+                if fft_np[-1] > fft_np[-2]: local_max_indices.append(len(fft_np)-1)
+            else:
+                local_max_indices = list(range(len(fft_np)))
+            
+            # Sort by amplitude (descending)
+            local_max_indices.sort(key=lambda idx: fft_np[idx], reverse=True)
+            top_peaks = local_max_indices[:5]
+            
+            st.caption("Dominant Frequencies (Top 5 Peaks)")
+            pk_cols = st.columns(5)
+            for i, col in enumerate(pk_cols):
+                with col:
+                    if i < len(top_peaks):
+                        p_idx = top_peaks[i]
+                        p_freq = frequencies[p_idx]
+                        p_amp = fft_np[p_idx]
+                        st.metric(f"Peak {i+1}", f"{int(p_freq)} Hz")
+                        st.markdown(f"<div style='margin-top:-15px; font-size:0.85rem; color:gray;'>Amp: {p_amp:.4f}</div>", unsafe_allow_html=True)
+                    else:
+                        st.metric(f"Peak {i+1}", "-")
+            # ---------------------------
+
+            if show_mqtt_calc:
                 
                 st.markdown("---")
                 st.subheader("MQTT Analysis")
