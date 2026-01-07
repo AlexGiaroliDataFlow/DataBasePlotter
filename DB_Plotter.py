@@ -1118,16 +1118,58 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
 
             for i, (label, key) in enumerate(zip(labels, keys)):
                 with cols[i]:
-                    st.markdown(f"**{label}**")
+                    st.markdown(f"{label}")
                     # Primary
-                    st.markdown(f"<div style='color:{PASTEL_COLORS[0]}; font-weight:bold; font-size:2.2rem; line-height:1.2;'>{stats_prim[key]:.4f}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='color:{PASTEL_COLORS[0]}; font-size:2.8rem; line-height:1.2;'>{stats_prim[key]:.4f}</div>", unsafe_allow_html=True)
                     # Comparison
                     if stats_comp:
-                        st.markdown(f"<div style='color:#E67E22; font-weight:bold; font-size:2.2rem; line-height:1.2;'>{stats_comp[key]:.4f}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='color:#E67E22; font-size:2.8rem; line-height:1.2;'>{stats_comp[key]:.4f}</div>", unsafe_allow_html=True)
                     else:
                         st.markdown("-")
 
             
+
+
+            # --- Top 5 Peaks Display ---
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("<div style='color:black; font-size:2.0rem; margin-bottom:10px;'>Dominant Frequencies (Top 5 Peaks)</div>", unsafe_allow_html=True)
+            
+            def get_top_peaks(vals, freqs):
+                vals_np = np.array(vals)
+                l_max = []
+                if len(vals_np) >= 3:
+                    for i in range(1, len(vals_np) - 1):
+                        if vals_np[i] > vals_np[i-1] and vals_np[i] > vals_np[i+1]:
+                            l_max.append(i)
+                    if vals_np[0] > vals_np[1]: l_max.append(0)
+                    if vals_np[-1] > vals_np[-2]: l_max.append(len(vals_np)-1)
+                else:
+                    l_max = list(range(len(vals_np)))
+                
+                l_max.sort(key=lambda x: vals_np[x], reverse=True)
+                return  l_max[:5]
+
+            p_peaks = get_top_peaks(fft_values, frequencies)
+            c_peaks = get_top_peaks(comp_fft_values, frequencies) if comp_fft_values else []
+
+            pk_cols = st.columns(5)
+            for i, col in enumerate(pk_cols):
+                with col:
+                    st.markdown(f"Peak {i+1}")
+                    # Primary
+                    if i < len(p_peaks):
+                        p_idx = p_peaks[i]
+                        st.markdown(f"<div style='color:{PASTEL_COLORS[0]}; font-size:1.8rem; line-height:1.2;'>{int(frequencies[p_idx])} Hz<br><span style='font-size:1.1rem; opacity:0.8;'>({fft_values[p_idx]:.3f})</span></div>", unsafe_allow_html=True)
+                    else:
+                         st.markdown("-")
+                    
+                    # Comparison
+                    if i < len(c_peaks):
+                        c_idx = c_peaks[i]
+                        st.markdown(f"<div style='color:#E67E22; font-size:1.8rem; line-height:1.2;'>{int(frequencies[c_idx])} Hz<br><span style='font-size:1.1rem; opacity:0.8;'>({comp_fft_values[c_idx]:.3f})</span></div>", unsafe_allow_html=True)
+                    elif comp_fft_values:
+                        st.markdown("-")
+
             if show_mqtt_calc:
                 # MQTT Calc logic (Primary Only)
                 st.markdown("---")
@@ -1166,47 +1208,6 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                      total_fft_samples = len(df)
                      total_fft_bytes = payload_size * total_fft_samples
                      mqtt_stats.add("FFT", total_fft_bytes, total_fft_samples, f"{total_fft_samples} Samples | P{percentile_value} | {len(peaks_list)} Peaks")
-
-
-            # --- Top 5 Peaks Display ---
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("<div style='color:black; font-weight:bold; font-size:1.5rem; margin-bottom:10px;'>Dominant Frequencies (Top 5 Peaks)</div>", unsafe_allow_html=True)
-            
-            def get_top_peaks(vals, freqs):
-                vals_np = np.array(vals)
-                l_max = []
-                if len(vals_np) >= 3:
-                    for i in range(1, len(vals_np) - 1):
-                        if vals_np[i] > vals_np[i-1] and vals_np[i] > vals_np[i+1]:
-                            l_max.append(i)
-                    if vals_np[0] > vals_np[1]: l_max.append(0)
-                    if vals_np[-1] > vals_np[-2]: l_max.append(len(vals_np)-1)
-                else:
-                    l_max = list(range(len(vals_np)))
-                
-                l_max.sort(key=lambda x: vals_np[x], reverse=True)
-                return  l_max[:5]
-
-            p_peaks = get_top_peaks(fft_values, frequencies)
-            c_peaks = get_top_peaks(comp_fft_values, frequencies) if comp_fft_values else []
-
-            pk_cols = st.columns(5)
-            for i, col in enumerate(pk_cols):
-                with col:
-                    st.markdown(f"**Peak {i+1}**")
-                    # Primary
-                    if i < len(p_peaks):
-                        p_idx = p_peaks[i]
-                        st.markdown(f"<div style='color:{PASTEL_COLORS[0]}; font-weight:bold; font-size:1.5rem; line-height:1.2;'>{int(frequencies[p_idx])} Hz<br><span style='font-size:1rem; opacity:0.8;'>({fft_values[p_idx]:.3f})</span></div>", unsafe_allow_html=True)
-                    else:
-                         st.markdown("-")
-                    
-                    # Comparison
-                    if i < len(c_peaks):
-                        c_idx = c_peaks[i]
-                        st.markdown(f"<div style='color:#E67E22; font-weight:bold; font-size:1.5rem; line-height:1.2;'>{int(frequencies[c_idx])} Hz<br><span style='font-size:1rem; opacity:0.8;'>({comp_fft_values[c_idx]:.3f})</span></div>", unsafe_allow_html=True)
-                    elif comp_fft_values:
-                        st.markdown("-")
 
         # --- UI Selection ---
         st.subheader("FFT Analysis")
@@ -1763,6 +1764,10 @@ def main():
     # Show available databases
     available_dbs = get_database_files(db_folder)
     
+    selected_db = None
+    db_path = None
+    folder_success_placeholder = None
+
     if available_dbs:
         selected_db = st.sidebar.selectbox(
             "Select a database:",
@@ -1770,30 +1775,12 @@ def main():
             help="Select a database from the Database folder"
         )
         db_path = db_folder / selected_db
+        folder_success_placeholder = st.sidebar.empty()
     else:
         st.sidebar.info("No databases found in the default folder.")
-        selected_db = None
-        db_path = None
     
-    # Transmission Quality Toggle
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Analysis Settings")
-    show_quality = st.sidebar.toggle("Transmission Quality", value=False, help="Highlight missing data and show success rate.")
-    show_mqtt_calc = st.sidebar.toggle("MQTT Packets", value=False, help="Calculate and show optimized MQTT JSON payload size.")
-    
-    mqtt_interval = 1
-    if show_mqtt_calc:
-        mqtt_interval = st.sidebar.slider(
-            "Sampling Interval (Seconds)",
-            min_value=1,
-            max_value=60,
-            value=1,
-            step=1,
-            help="Simulate sending a packet every N seconds."
-        )
-
     stats_placeholder = st.sidebar.empty()
-    mqtt_stats = MqttStats() if show_mqtt_calc else None
+    mqtt_stats = MqttStats() if "show_mqtt_calc" in st.session_state and st.session_state.show_mqtt_calc else None
     
     # File uploader for custom database
 
@@ -1804,14 +1791,13 @@ def main():
         type=['db'],
         help="Upload a SQLite database file"
     )
-    
+    upload_success_placeholder = st.sidebar.empty()
     if uploaded_file is not None:
         # Save uploaded file temporarily
         temp_path = Path("temp_uploaded.db")
         with open(temp_path, 'wb') as f:
             f.write(uploaded_file.getvalue())
         db_path = temp_path
-        st.sidebar.success(f"Loaded: {uploaded_file.name}")
     
     if db_path is None or not Path(db_path).exists():
         st.warning("Please select or upload a database to visualize.")
@@ -1820,11 +1806,21 @@ def main():
     # Load database
     try:
         conn = load_database(str(db_path))
-        st.sidebar.success("Connected to database")
+        if uploaded_file is not None:
+            upload_success_placeholder.success(f"Connected: {uploaded_file.name}")
+        elif available_dbs:
+            folder_success_placeholder.success(f"Connected: {selected_db}")
     except Exception as e:
         st.error(f"Failed to connect to database: {e}")
         return
     
+    # Initialize variables for usage in tabs before the sidebar toggles are defined at the end
+    show_quality = st.session_state.get("show_quality_toggle", False)
+    show_mqtt_calc = st.session_state.get("show_mqtt_calc_toggle", False)
+    mqtt_interval = st.session_state.get("mqtt_interval_slider", 1)
+    if show_mqtt_calc and mqtt_stats is None:
+        mqtt_stats = MqttStats()
+
     # Create tabs for different data types
     tab1, tab2, tab3, tab4 = st.tabs([
         "Sensors",
@@ -1956,6 +1952,23 @@ def main():
                         label_visibility="collapsed"
                     )
 
+    # Analysis Settings at the very bottom of sidebar
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Analysis Settings")
+    show_quality = st.sidebar.toggle("Transmission Quality", value=show_quality, help="Highlight missing data and show success rate.", key="show_quality_toggle")
+    show_mqtt_calc = st.sidebar.toggle("MQTT Packets", value=show_mqtt_calc, help="Calculate and show optimized MQTT JSON payload size.", key="show_mqtt_calc_toggle")
+    
+    if show_mqtt_calc:
+        mqtt_interval = st.sidebar.slider(
+            "Sampling Interval (Seconds)",
+            min_value=1,
+            max_value=60,
+            value=mqtt_interval,
+            step=1,
+            help="Simulate sending a packet every N seconds.",
+            key="mqtt_interval_slider"
+        )
+    
 
     
     # Clean up temporary file if it exists
