@@ -1022,41 +1022,60 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 elif len(comp_fft_values) < len(frequencies):
                     comp_fft_values += [0] * (len(frequencies) - len(comp_fft_values))
 
-            # Calculate percentile threshold (Primary only for now)
-            percentile_threshold = np.percentile(fft_values, percentile_value)
+            # Calculate percentile thresholds
+            primary_threshold = np.percentile(fft_values, percentile_value)
+            comp_threshold = np.percentile(comp_fft_values, percentile_value) if comp_fft_values else None
             
             # Create Figure
             fig = go.Figure()
 
-            # Plot Primary (Blue)
-            # Use Bars for primary as before
+            # --- Primary Colors ---
+            primary_colors = PASTEL_COLORS[0]
+            if show_mqtt_calc:
+                darker_blue = '#2874A6'
+                primary_colors = [darker_blue if v > primary_threshold else PASTEL_COLORS[0] for v in fft_values]
+
+            # Plot Primary
             fig.add_trace(go.Bar(
                 x=frequencies,
                 y=fft_values,
                 name="Primary",
-                marker_color=PASTEL_COLORS[0], # Blue
+                marker_color=primary_colors,
                 hovertemplate='<b>Primary</b><br>Freq: %{x:.1f} Hz<br>Amp: %{y:.4f}<extra></extra>'
             ))
 
-            # Plot Comparison (Orange) - Overlay
+            # --- Comparison Colors ---
             if comp_fft_values:
+                comp_colors = 'rgba(230, 126, 34, 0.8)' # Default Orange
+                if show_mqtt_calc:
+                    darker_orange = 'rgba(168, 67, 0, 0.9)'
+                    comp_colors = [darker_orange if v > comp_threshold else 'rgba(230, 126, 34, 0.8)' for v in comp_fft_values]
+
                 fig.add_trace(go.Bar(
                     x=frequencies,
                     y=comp_fft_values,
                     name="Comparison",
-                    marker_color='rgba(230, 126, 34, 0.8)', # Orange with 0.8 opacity
+                    marker_color=comp_colors,
                     hovertemplate='<b>Comparison</b><br>Freq: %{x:.1f} Hz<br>Amp: %{y:.4f}<extra></extra>'
                 ))
 
-            # Add horizontal line for percentile
+            # Add horizontal line for primary percentile
             if show_mqtt_calc:
                 fig.add_hline(
-                    y=percentile_threshold,
-                    line_dash="dash",
-                    line_color="#e74c3c",
-                    annotation_text=f"{percentile_value}th: {percentile_threshold:.4f}",
+                    y=primary_threshold,
+                    line_dash="dot",
+                    line_color=PASTEL_COLORS[0],
+                    annotation_text=f"Primary {percentile_value}th: {primary_threshold:.4f}",
                     annotation_position="top right"
                 )
+                if comp_threshold is not None:
+                    fig.add_hline(
+                        y=comp_threshold,
+                        line_dash="dot",
+                        line_color="#E67E22",
+                        annotation_text=f"Comp {percentile_value}th: {comp_threshold:.4f}",
+                        annotation_position="bottom right"
+                    )
             
             fft_type = row.get('type', 'acceleration')
             amplitude_unit = 'G' if fft_type == 'acceleration' else 'mm/s'
@@ -1097,8 +1116,8 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     'peaks_count': peaks_abv
                 }
 
-            stats_prim = calc_stats(fft_values, percentile_threshold)
-            stats_comp = calc_stats(comp_fft_values, percentile_threshold) if comp_fft_values else None
+            stats_prim = calc_stats(fft_values, primary_threshold)
+            stats_comp = calc_stats(comp_fft_values, comp_threshold) if comp_fft_values else None
 
             # Display Stats
             # We color code: Blue for Primary, Orange for Comparison
@@ -1119,11 +1138,17 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             for i, (label, key) in enumerate(zip(labels, keys)):
                 with cols[i]:
                     st.markdown(f"{label}")
+                    
+                    # Format logic: integer for peaks_count, float for others
+                    p_val_str = f"{int(stats_prim[key])}" if key == 'peaks_count' else f"{stats_prim[key]:.4f}"
+                    
                     # Primary
-                    st.markdown(f"<div style='color:{PASTEL_COLORS[0]}; font-size:2.8rem; line-height:1.2;'>{stats_prim[key]:.4f}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='color:{PASTEL_COLORS[0]}; font-size:2.8rem; line-height:1.2;'>{p_val_str}</div>", unsafe_allow_html=True)
+                    
                     # Comparison
                     if stats_comp:
-                        st.markdown(f"<div style='color:#E67E22; font-size:2.8rem; line-height:1.2;'>{stats_comp[key]:.4f}</div>", unsafe_allow_html=True)
+                        c_val_str = f"{int(stats_comp[key])}" if key == 'peaks_count' else f"{stats_comp[key]:.4f}"
+                        st.markdown(f"<div style='color:#E67E22; font-size:2.8rem; line-height:1.2;'>{c_val_str}</div>", unsafe_allow_html=True)
                     else:
                         st.markdown("-")
 
@@ -1182,7 +1207,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
 
                 peaks_list = []
                 for i, val in enumerate(fft_values):
-                    if val > percentile_threshold:
+                    if val > primary_threshold:
                         peaks_list.append([float(round(frequencies[i], 1)), float(round(val, 2))])
                 
                 payload = {
@@ -1779,7 +1804,7 @@ def main():
     else:
         st.sidebar.info("No databases found in the default folder.")
     
-    stats_placeholder = st.sidebar.empty()
+    # stats_placeholder removed - breakdown now renders directly in sidebar after toggles
     mqtt_stats = MqttStats() if "show_mqtt_calc" in st.session_state and st.session_state.show_mqtt_calc else None
     
     # File uploader for custom database
@@ -1908,50 +1933,6 @@ def main():
         else:
             st.warning("GPS data table not found in database.")
 
-    # Update sidebar stats if mqtt enabled
-    if show_mqtt_calc and mqtt_stats:
-        with stats_placeholder.container():
-            total_bytes = sum(s['bytes'] for s in mqtt_stats.sources.values())
-            total_pkts = mqtt_stats.get_total_4kb_packets()
-            
-            # Format total size
-            if total_bytes < 1024:
-                size_str = f"{total_bytes} B"
-            elif total_bytes < 1024 * 1024:
-                size_str = f"{total_bytes / 1024:.2f} KB"
-            else:
-                size_str = f"{total_bytes / (1024 * 1024):.2f} MB"
-            
-            st.metric("Total Transmission", size_str)
-            st.metric("Total 4KB Packets", f"{total_pkts:,}")
-            
-            st.markdown("### Contribution Breakdown")
-            breakdown = mqtt_stats.get_breakdown()
-            for source, data in breakdown.items():
-                b_val = data['bytes']
-                dur = data['duration']
-                
-                if b_val < 1024:
-                    s_str = f"{b_val} B"
-                elif b_val < 1024 * 1024:
-                    s_str = f"{b_val / 1024:.2f} KB"
-                else:
-                    s_str = f"{b_val / (1024 * 1024):.2f} MB"
-                    
-                st.markdown(f"**{source}**")
-                st.caption(f"Size: {s_str} | Time: {dur}")
-                
-                if source == "FFT":
-                    st.slider(
-                        "Percentile Threshold",
-                        min_value=50,
-                        max_value=99,
-                        value=st.session_state.get("percentile_slider", 90),
-                        step=1,
-                        key="percentile_slider",
-                        label_visibility="collapsed"
-                    )
-
     # Analysis Settings at the very bottom of sidebar
     st.sidebar.markdown("---")
     st.sidebar.subheader("Analysis Settings")
@@ -1968,6 +1949,52 @@ def main():
             help="Simulate sending a packet every N seconds.",
             key="mqtt_interval_slider"
         )
+
+    # Update sidebar stats if mqtt enabled - NOW APPEARS AFTER THE TOGGLE
+    if show_mqtt_calc and mqtt_stats:
+        total_bytes = sum(s['bytes'] for s in mqtt_stats.sources.values())
+        total_pkts = mqtt_stats.get_total_4kb_packets()
+        
+        # Format total size
+        if total_bytes < 1024:
+            size_str = f"{total_bytes} B"
+        elif total_bytes < 1024 * 1024:
+            size_str = f"{total_bytes / 1024:.2f} KB"
+        else:
+            size_str = f"{total_bytes / (1024 * 1024):.2f} MB"
+        
+        st.sidebar.metric("Total Transmission", size_str)
+        st.sidebar.metric("Total 4KB Packets", f"{total_pkts:,}")
+        
+        st.sidebar.markdown("### Contribution Breakdown")
+        breakdown = mqtt_stats.get_breakdown()
+        for source, data in breakdown.items():
+            b_val = data['bytes']
+            dur = data['duration']
+            
+            if b_val < 1024:
+                s_str = f"{b_val} B"
+            elif b_val < 1024 * 1024:
+                s_str = f"{b_val / 1024:.2f} KB"
+            else:
+                s_str = f"{b_val / (1024 * 1024):.2f} MB"
+                
+            st.sidebar.markdown(f"**{source}**")
+            if source == "FFT":
+                st.sidebar.caption(f"Size: {s_str} | {dur}")
+            else:
+                st.sidebar.caption(f"Size: {s_str} | Time: {dur}")
+            
+            if source == "FFT":
+                st.sidebar.slider(
+                    "Percentile Threshold",
+                    min_value=50,
+                    max_value=99,
+                    value=st.session_state.get("percentile_slider", 90),
+                    step=1,
+                    key="percentile_slider",
+                    label_visibility="collapsed"
+                )
     
 
     
