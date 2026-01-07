@@ -142,6 +142,28 @@ PASTEL_BLUE = '#5DADE2'
 PASTEL_RED = '#E74C3C'
 PASTEL_GREEN = '#58D68D'
 
+class MqttStats:
+    def __init__(self):
+        self.sources = {}
+
+    def add(self, source, bytes_count, packets_count, duration_str="N/A"):
+        if source not in self.sources:
+            self.sources[source] = {'bytes': bytes_count, 'packets': packets_count, 'duration': duration_str}
+        else:
+            self.sources[source]['bytes'] += bytes_count
+            self.sources[source]['packets'] += packets_count
+            # Update duration if available and not set or just overwrite
+            if duration_str != "N/A":
+                self.sources[source]['duration'] = duration_str
+
+    def get_total_mb(self):
+        return sum(s['bytes'] for s in self.sources.values()) / (1024 * 1024)
+
+    def get_total_4kb_packets(self):
+        return math.ceil(sum(s['bytes'] for s in self.sources.values()) / 4096)
+        
+    def get_breakdown(self):
+        return self.sources
 
 def get_database_files(folder_path: Path) -> list:
     """Get list of .db files in the specified folder, sorted by modification time (newest first)."""
@@ -340,7 +362,7 @@ def create_date_range_slider(df: pd.DataFrame, key_prefix: str):
     return df[mask].copy(), 'datetime'
 
 
-def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = True, show_mqtt_calc: bool = True):
+def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = True, show_mqtt_calc: bool = True, mqtt_interval: int = 1, mqtt_stats: 'MqttStats' = None):
     """Create interactive time series plots for sensor data."""
     if df_filtered is None or df_filtered.empty:
         st.warning("No sensor data available.")
@@ -488,7 +510,7 @@ def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool 
 
 
 
-def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: bool = True):
+def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: bool = True, mqtt_interval: int = 1, mqtt_stats: 'MqttStats' = None):
     """Create interactive time series plots for power analyzer data."""
     if df.empty:
         st.warning("No power analyzer data available.")
@@ -731,15 +753,7 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
             duration_sec = float(len(df_filtered))
             st.info(f"Selected Range: {len(df_filtered)} samples")
             
-        sim_interval_power = st.slider(
-            "Simulated Sampling Interval (Seconds)",
-            min_value=1,
-            max_value=10,
-            value=1,
-            step=1,
-            help="Simulate sending a packet every N seconds.",
-            key="power_interval_slider"
-        )
+        sim_interval_power = mqtt_interval
         
         # Ensure duration is at least 1s
         duration_sec = max(1.0, duration_sec)
@@ -798,6 +812,9 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
         total_size_mb = total_size_bytes / (1024 * 1024)
         packets_4kb = math.ceil(total_size_bytes / 4096)
         
+        if mqtt_stats:
+            mqtt_stats.add("Power Analyzer", total_size_bytes, total_packets, duration_str)
+
         c1, c2, c3, c4 = st.columns(4)
         with c1:
              st.metric("4KB Packets Needed", f"{packets_4kb:,}")
@@ -806,14 +823,14 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
         with c3:
              st.metric("Avg Packet Size", f"{avg_packet_size} bytes")
         with c4:
-             st.metric("Total Transmission Size", f"{total_size_mb:.2f} MB")
+             st.metric("Total Transmission Size (Power)", f"{total_size_mb:.2f} MB")
              
         with st.expander("View Json packet (first 10 rows)", expanded=False):
             # Show just the first 10 packets for preview
             preview_json_sequence = "\n".join([json.dumps(p, separators=(',', ':'), allow_nan=True) for p in all_payloads_power[:10]])
             st.code(preview_json_sequence, language='json')
 
-def plot_tilt_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = True, show_mqtt_calc: bool = True):
+def plot_tilt_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = True, show_mqtt_calc: bool = True, mqtt_interval: int = 1, mqtt_stats: 'MqttStats' = None):
     """Create interactive time series plot for tilt data."""
     if df_filtered is None or df_filtered.empty:
         st.warning("No tilt data available.")
@@ -926,10 +943,7 @@ def plot_tilt_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = 
                  
     return df_filtered, ['tilt_angle'] if 'tilt_angle' in df_filtered.columns else []
 
-
-
-
-def plot_fft_data(df: pd.DataFrame, show_mqtt_calc: bool = True):
+def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: bool = True, mqtt_stats: 'MqttStats' = None):
     """Create interactive bar charts for FFT data."""
     if df.empty:
         st.warning("No FFT data available.")
@@ -946,6 +960,40 @@ def plot_fft_data(df: pd.DataFrame, show_mqtt_calc: bool = True):
     fft_tab1, fft_tab2, fft_tab3 = st.tabs(["FFT", "FFT in Time", "Advanced Analysis"])
     
     with fft_tab1:
+        # Transmission Quality Analysis
+        if show_quality:
+            st.subheader("Transmission Quality")
+            # Ensure we have a time column or ID for analysis
+            time_col = 'datetime'
+            if 'datetime' not in df.columns:
+                # Try to use unix_start if available
+                if 'unix_start' in df.columns:
+                     df['datetime'] = pd.to_datetime(df['unix_start'], unit='s')
+                elif 'unix_timestamp' in df.columns:
+                     df['datetime'] = pd.to_datetime(df['unix_timestamp'], unit='s')
+            
+            # Use 'max_amplitude_g' for local validity check if available
+            check_col = 'max_amplitude_g' if 'max_amplitude_g' in df.columns else None
+            
+            stats, global_gaps, local_gaps = analyze_transmission_quality(df, time_col, column_name=check_col)
+            
+            m1, m2, m3, m4, m5 = st.columns(5)
+            with m1:
+                st.metric("Success Rate", f"{stats['success_rate']:.2f}%")
+            with m2:
+                st.metric("Valid Packets", stats['actual'] - stats['local_lost'])
+            with m3:
+                st.metric("Transmission Loss", stats['global_lost'], help="Packets not received (network gap)")
+            with m4:
+                st.metric("Sensor Faults", stats['local_lost'], help="Packets received but value is invalid")
+            with m5:
+                st.metric("Total Expected", stats['expected'])
+                
+            if stats['success_rate'] < 95.0:
+                 st.error(f"Issue detected with FFT Data: {stats['total_lost']} total lost packets.")
+            
+            st.markdown("---")
+
         # Build dropdown options with metadata
         # Format: axis, amplitude (G), type, Number of points, interval of analysis
         dropdown_options = []
@@ -962,18 +1010,11 @@ def plot_fft_data(df: pd.DataFrame, show_mqtt_calc: bool = True):
             label = f"{axis} | {amplitude_str} | {fft_type} | {num_points} Hz | {interval}"
             dropdown_options.append((idx, label))
         
-        # Percentile selector
-        percentile_value = st.slider(
-            "Percentile Threshold for Peak Detection",
-            min_value=50,
-            max_value=99,
-            value=90,
-            step=1,
-            key="percentile_slider"
-        )
+        # Percentile selector - Uses value from sidebar slider (defined in main breakdown)
+        percentile_value = st.session_state.get("percentile_slider", 90)
         
         # Helper function to plot a single FFT
-        def plot_single_fft(selected_idx: int, key_suffix: str, title_prefix: str):
+        def plot_single_fft(selected_idx: int, key_suffix: str, title_prefix: str, update_global_stats: bool = False):
             row = df.iloc[selected_idx]
             
             # Extract FFT values
@@ -993,11 +1034,14 @@ def plot_fft_data(df: pd.DataFrame, show_mqtt_calc: bool = True):
             # Calculate percentile threshold
             percentile_threshold = np.percentile(fft_values, percentile_value)
             
-            # Assign colors: vivid blue for normal, vivid red for above percentile
-            colors = [
-                PASTEL_RED if val > percentile_threshold else PASTEL_BLUE
-                for val in fft_values
-            ]
+            # Assign colors
+            if show_mqtt_calc:
+                 colors = [
+                    PASTEL_RED if val > percentile_threshold else PASTEL_BLUE
+                    for val in fft_values
+                ]
+            else:
+                 colors = PASTEL_BLUE
             
             # Create bar chart
             fig = go.Figure(data=[
@@ -1009,14 +1053,15 @@ def plot_fft_data(df: pd.DataFrame, show_mqtt_calc: bool = True):
                 )
             ])
             
-            # Add horizontal line for percentile
-            fig.add_hline(
-                y=percentile_threshold,
-                line_dash="dash",
-                line_color="#e74c3c",
-                annotation_text=f"{percentile_value}th percentile: {percentile_threshold:.4f}",
-                annotation_position="top right"
-            )
+            # Add horizontal line for percentile if MQTT Optimization is ON
+            if show_mqtt_calc:
+                fig.add_hline(
+                    y=percentile_threshold,
+                    line_dash="dash",
+                    line_color="#e74c3c",
+                    annotation_text=f"{percentile_value}th percentile: {percentile_threshold:.4f}",
+                    annotation_position="top right"
+                )
             
             fft_type = row.get('type', 'acceleration')
             amplitude_unit = 'G' if fft_type == 'acceleration' else 'mm/s'
@@ -1039,17 +1084,26 @@ def plot_fft_data(df: pd.DataFrame, show_mqtt_calc: bool = True):
             ground_values = [val for val in fft_values if val <= percentile_threshold]
             ground_average = sum(ground_values) / len(ground_values) if ground_values else 0
             
-            col1, col2, col3, col4, col5 = st.columns(5)
-            with col1:
-                st.metric("Max Amplitude", f"{max(fft_values):.4f}")
-            with col2:
-                st.metric("Min Amplitude", f"{min(fft_values):.4f}")
-            with col3:
-                st.metric("Mean Amplitude", f"{sum(fft_values)/len(fft_values):.4f}")
-            with col4:
-                st.metric("Ground Average", f"{ground_average:.4f}")
-            with col5:
-                st.metric(f"Peaks > {percentile_value}th", peaks_above)
+            if show_mqtt_calc:
+                col1, col2, col3, col4, col5 = st.columns(5)
+                with col1:
+                    st.metric("Max Amplitude", f"{max(fft_values):.4f}")
+                with col2:
+                    st.metric("Min Amplitude", f"{min(fft_values):.4f}")
+                with col3:
+                    st.metric("Mean Amplitude", f"{sum(fft_values)/len(fft_values):.4f}")
+                with col4:
+                    st.metric("Ground Average", f"{ground_average:.4f}")
+                with col5:
+                    st.metric(f"Peaks > {percentile_value}th", peaks_above)
+            else:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Max Amplitude", f"{max(fft_values):.4f}")
+                with col2:
+                    st.metric("Min Amplitude", f"{min(fft_values):.4f}")
+                with col3:
+                    st.metric("Mean Amplitude", f"{sum(fft_values)/len(fft_values):.4f}")
                 
             if show_mqtt_calc:
                 # Construct optimized payload
@@ -1088,6 +1142,13 @@ def plot_fft_data(df: pd.DataFrame, show_mqtt_calc: bool = True):
                     with st.expander("View JSON Payload", expanded=False):
                         st.text("Raw Compact JSON (One Line):")
                         st.code(json_str, language='json', line_numbers=False)
+
+                if mqtt_stats and update_global_stats:
+                     # Approximate total size for ALL FFT samples if they were sent
+                     # Use the size of the CURRENT displayed sample as the average
+                     total_fft_samples = len(df)
+                     total_fft_bytes = payload_size * total_fft_samples
+                     mqtt_stats.add("FFT", total_fft_bytes, total_fft_samples, f"{total_fft_samples} Samples | P{percentile_value} | {len(peaks_list)} Peaks")
         
         # First FFT viewer
         st.subheader("Primary FFT")
@@ -1097,7 +1158,7 @@ def plot_fft_data(df: pd.DataFrame, show_mqtt_calc: bool = True):
             format_func=lambda x: dropdown_options[x][1],
             key="fft_selector_1"
         )
-        plot_single_fft(selected_idx_1, "1", "")
+        plot_single_fft(selected_idx_1, "1", "", update_global_stats=True)
         
         # Separator
         st.markdown("---")
@@ -1111,8 +1172,7 @@ def plot_fft_data(df: pd.DataFrame, show_mqtt_calc: bool = True):
             key="fft_selector_2",
             index=min(1, len(dropdown_options) - 1)  # Default to second sample if available
         )
-        plot_single_fft(selected_idx_2, "2", "Comparison: ")
-    
+        plot_single_fft(selected_idx_2, "2", "Comparison: ", update_global_stats=False)    
     # Common filters for subtabs 2 and 3
     # Get available axes and types
     available_axes = df['axis'].dropna().unique().tolist() if 'axis' in df.columns else ['X', 'Y', 'Z']
@@ -1428,7 +1488,7 @@ def plot_gps_data(df: pd.DataFrame):
     st.dataframe(df_valid[available_cols])
 
 
-def display_combined_mqtt_simulation(df_sensor, cols_sensor, df_tilt, cols_tilt, x_axis_name):
+def display_combined_mqtt_simulation(df_sensor, cols_sensor, df_tilt, cols_tilt, x_axis_name, mqtt_interval: int = 1, mqtt_stats: 'MqttStats' = None):
     """
     Display MQTT simulation stats for combined sensor and tilt data.
     """
@@ -1470,15 +1530,7 @@ def display_combined_mqtt_simulation(df_sensor, cols_sensor, df_tilt, cols_tilt,
         duration_sec = float(len(main_df))
         st.info(f"Selected Range: {len(main_df)} samples")
         
-    sim_interval = st.slider(
-        "Simulated Sampling Interval (Seconds)",
-        min_value=1,
-        max_value=10,
-        value=1,
-        step=1,
-        help="Simulate sending a packet every N seconds.",
-        key="combined_interval_slider"
-    )
+    sim_interval = mqtt_interval
     
     duration_sec = max(1.0, duration_sec)
     
@@ -1566,6 +1618,9 @@ def display_combined_mqtt_simulation(df_sensor, cols_sensor, df_tilt, cols_tilt,
     total_size_mb = total_size_bytes / (1024 * 1024)
     packets_4kb = math.ceil(total_size_bytes / 4096)
     
+    if mqtt_stats:
+        mqtt_stats.add("Sensors & Tilt", total_size_bytes, total_packets, duration_str)
+
     c1, c2, c3, c4 = st.columns(4)
     with c1:
             st.metric("4KB Packets Needed", f"{packets_4kb:,}")
@@ -1617,6 +1672,20 @@ def main():
     st.sidebar.subheader("Analysis Settings")
     show_quality = st.sidebar.toggle("Transmission Quality", value=False, help="Highlight missing data and show success rate.")
     show_mqtt_calc = st.sidebar.toggle("MQTT Packets", value=False, help="Calculate and show optimized MQTT JSON payload size.")
+    
+    mqtt_interval = 1
+    if show_mqtt_calc:
+        mqtt_interval = st.sidebar.slider(
+            "Sampling Interval (Seconds)",
+            min_value=1,
+            max_value=60,
+            value=1,
+            step=1,
+            help="Simulate sending a packet every N seconds."
+        )
+
+    stats_placeholder = st.sidebar.empty()
+    mqtt_stats = MqttStats() if show_mqtt_calc else None
     
     # File uploader for custom database
 
@@ -1689,40 +1758,42 @@ def main():
                 df_tilt_filtered = df_tilt_raw.copy()
 
             # Plot Sensors
-            res = plot_sensor_data(df_sensors_filtered, x_axis_res, show_quality, show_mqtt_calc)
+            # Pass show_mqtt_calc=False to sensors plot so it doesn't duplicate the MQTT display
+            # We will use the Combined display for this tab
+            res = plot_sensor_data(df_sensors_filtered, x_axis_res, show_quality, False, mqtt_interval, mqtt_stats)
             if res:
                 df_sensor_res, cols_sensor_res, x_axis_res = res
             
             # Plot Tilt
             if not df_tilt_filtered.empty:
                 st.markdown("---") # Separator
-                res_t = plot_tilt_data(df_tilt_filtered, x_axis_res, show_quality, show_mqtt_calc)
+                res_t = plot_tilt_data(df_tilt_filtered, x_axis_res, show_quality, show_mqtt_calc, mqtt_interval, mqtt_stats)
                 if res_t:
                     df_tilt_res, cols_tilt_res = res_t
             
             # Combined MQTT
             if show_mqtt_calc:
-                 display_combined_mqtt_simulation(df_sensor_res, cols_sensor_res, df_tilt_res, cols_tilt_res, x_axis_res)
+                 display_combined_mqtt_simulation(df_sensor_res, cols_sensor_res, df_tilt_res, cols_tilt_res, x_axis_res, mqtt_interval, mqtt_stats)
         else:
             if df_tilt_raw.empty:
                 st.warning("No sensor or tilt data found.")
             else:
                 # Fallback: only tilt exists
                 df_tilt_filtered, x_axis_res = create_date_range_slider(df_tilt_raw, "tilt_only")
-                plot_tilt_data(df_tilt_filtered, x_axis_res, show_quality, show_mqtt_calc)
+                plot_tilt_data(df_tilt_filtered, x_axis_res, show_quality, show_mqtt_calc, mqtt_interval, mqtt_stats)
 
     
     with tab2:
         if check_table_exists(conn, 'power_analyzer_data'):
             df_power = get_table_data(conn, 'power_analyzer_data')
-            plot_power_analyzer_data(df_power, show_quality, show_mqtt_calc)
+            plot_power_analyzer_data(df_power, show_quality, show_mqtt_calc, mqtt_interval, mqtt_stats)
         else:
             st.warning("Power analyzer data table not found in database.")
     
     with tab3:
         if check_table_exists(conn, 'fft_data'):
             df_fft = get_table_data(conn, 'fft_data')
-            plot_fft_data(df_fft, show_mqtt_calc)
+            plot_fft_data(df_fft, show_quality, show_mqtt_calc, mqtt_stats)
         else:
             st.warning("FFT data table not found in database.")
     
@@ -1732,6 +1803,50 @@ def main():
             plot_gps_data(df_gps)
         else:
             st.warning("GPS data table not found in database.")
+
+    # Update sidebar stats if mqtt enabled
+    if show_mqtt_calc and mqtt_stats:
+        with stats_placeholder.container():
+            total_bytes = sum(s['bytes'] for s in mqtt_stats.sources.values())
+            total_pkts = mqtt_stats.get_total_4kb_packets()
+            
+            # Format total size
+            if total_bytes < 1024:
+                size_str = f"{total_bytes} B"
+            elif total_bytes < 1024 * 1024:
+                size_str = f"{total_bytes / 1024:.2f} KB"
+            else:
+                size_str = f"{total_bytes / (1024 * 1024):.2f} MB"
+            
+            st.metric("Total Transmission", size_str)
+            st.metric("Total 4KB Packets", f"{total_pkts:,}")
+            
+            st.markdown("### Contribution Breakdown")
+            breakdown = mqtt_stats.get_breakdown()
+            for source, data in breakdown.items():
+                b_val = data['bytes']
+                dur = data['duration']
+                
+                if b_val < 1024:
+                    s_str = f"{b_val} B"
+                elif b_val < 1024 * 1024:
+                    s_str = f"{b_val / 1024:.2f} KB"
+                else:
+                    s_str = f"{b_val / (1024 * 1024):.2f} MB"
+                    
+                st.markdown(f"**{source}**")
+                st.caption(f"Size: {s_str} | Time: {dur}")
+                
+                if source == "FFT":
+                    st.slider(
+                        "Percentile Threshold",
+                        min_value=50,
+                        max_value=99,
+                        value=st.session_state.get("percentile_slider", 90),
+                        step=1,
+                        key="percentile_slider",
+                        label_visibility="collapsed"
+                    )
 
 
 
