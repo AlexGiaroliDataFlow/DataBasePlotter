@@ -759,7 +759,17 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
         duration_sec = max(1.0, duration_sec)
         
         # 3. Construct all Payloads
-        visible_cols = list(set(d['col'] for d in plot_definitions))
+        # 3. Construct all Payloads
+        visible_cols_set = set()
+        visible_cols = []
+        for d in plot_definitions:
+            if d['col'] not in visible_cols_set:
+                visible_cols.append(d['col'])
+                visible_cols_set.add(d['col'])
+        
+        # Create mapping for optimized keys (incremental numbers)
+        col_map = {col: str(i+1) for i, col in enumerate(visible_cols)}
+
         all_payloads_power = []
 
         if isinstance(time_min, pd.Timestamp):
@@ -775,11 +785,12 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
                 for col in visible_cols:
                     if col in row:
                         val = row[col]
+                        key = col_map[col]
                         if pd.isna(val) or val is None:
-                            payload[col] = float('nan')
+                            payload[key] = float('nan')
                         else:
-                            try: payload[col] = round(float(val), 2)
-                            except: payload[col] = str(val)
+                            try: payload[key] = round(float(val), 2)
+                            except: payload[key] = str(val)
                 
                 all_payloads_power.append(payload)
                 current_time += timedelta(seconds=sim_interval_power)
@@ -791,10 +802,11 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
                 for col in visible_cols:
                     if col in row:
                         val = row[col]
-                        if pd.isna(val) or val is None: payload[col] = float('nan')
+                        key = col_map[col]
+                        if pd.isna(val) or val is None: payload[key] = float('nan')
                         else:
-                            try: payload[col] = round(float(val), 2)
-                            except: payload[col] = str(val)
+                            try: payload[key] = round(float(val), 2)
+                            except: payload[key] = str(val)
                 all_payloads_power.append(payload)
 
         if not all_payloads_power:
@@ -1704,6 +1716,15 @@ def display_combined_mqtt_simulation(df_sensor, cols_sensor, df_tilt, cols_tilt,
     # 3. Construct all Payloads
     all_payloads = []
     
+    # Create mapping for columns to incremental numbers
+    all_cols = []
+    if cols_sensor: all_cols.extend(cols_sensor)
+    if cols_tilt: all_cols.extend(cols_tilt)
+    
+    # Remove duplicates while preserving order if any
+    unique_cols = list(dict.fromkeys(all_cols))
+    col_map = {col: str(i+1) for i, col in enumerate(unique_cols)}
+    
     # We'll sample the dataframe based on the sim_interval
     if isinstance(time_min, pd.Timestamp):
         current_time = time_min
@@ -1724,22 +1745,24 @@ def display_combined_mqtt_simulation(df_sensor, cols_sensor, df_tilt, cols_tilt,
                 if row_s is not None:
                     for col in cols_sensor:
                         val = row_s.get(col)
+                        key = col_map[col]
                         if pd.isna(val) or val is None:
-                            payload[col] = float('nan')
+                            payload[key] = float('nan')
                         else:
-                            try: payload[col] = round(float(val), 2)
-                            except: payload[col] = str(val)
+                            try: payload[key] = round(float(val), 2)
+                            except: payload[key] = str(val)
 
             if df_tilt is not None and not df_tilt.empty and cols_tilt:
                 row_t = get_nearest_row(df_tilt, current_time)
                 if row_t is not None:
                     for col in cols_tilt:
                         val = row_t.get(col)
+                        key = col_map[col]
                         if pd.isna(val) or val is None:
-                            payload[col] = float('nan')
+                            payload[key] = float('nan')
                         else:
-                            try: payload[col] = round(float(val), 2)
-                            except: payload[col] = str(val)
+                            try: payload[key] = round(float(val), 2)
+                            except: payload[key] = str(val)
             
             all_payloads.append(payload)
             current_time += timedelta(seconds=sim_interval)
@@ -1755,19 +1778,21 @@ def display_combined_mqtt_simulation(df_sensor, cols_sensor, df_tilt, cols_tilt,
                 row_s = df_sensor.iloc[i]
                 for col in cols_sensor:
                     val = row_s.get(col)
-                    if pd.isna(val) or val is None: payload[col] = float('nan')
+                    key = col_map[col]
+                    if pd.isna(val) or val is None: payload[key] = float('nan')
                     else:
-                        try: payload[col] = round(float(val), 2)
-                        except: payload[col] = str(val)
+                        try: payload[key] = round(float(val), 2)
+                        except: payload[key] = str(val)
             
             if df_tilt is not None and i < len(df_tilt) and cols_tilt:
                 row_t = df_tilt.iloc[i]
                 for col in cols_tilt:
                     val = row_t.get(col)
-                    if pd.isna(val) or val is None: payload[col] = float('nan')
+                    key = col_map[col]
+                    if pd.isna(val) or val is None: payload[key] = float('nan')
                     else:
-                        try: payload[col] = round(float(val), 2)
-                        except: payload[col] = str(val)
+                        try: payload[key] = round(float(val), 2)
+                        except: payload[key] = str(val)
             
             all_payloads.append(payload)
 
