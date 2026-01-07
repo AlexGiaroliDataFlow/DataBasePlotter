@@ -1035,94 +1035,143 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
         # Percentile selector - Uses value from sidebar slider (defined in main breakdown)
         percentile_value = st.session_state.get("percentile_slider", 90)
         
-        # Helper function to plot a single FFT
-        def plot_single_fft(selected_idx: int, key_suffix: str, title_prefix: str, update_global_stats: bool = False):
-            row = df.iloc[selected_idx]
+        # Helper function to plot FFT with optional comparison
+        def plot_fft_comparison(primary_idx: int, comparison_idx: int = None, update_global_stats: bool = False):
+            # --- Primary Data ---
+            row = df.iloc[primary_idx]
             num_points = row.get('number_of_points', len(fft_cols))
-            
-            # Extract FFT values
             fft_values = [row[col] for col in fft_cols if pd.notna(row[col])]
-            
-            # Generate frequency array: 0, 1, 2, ... N-1 Hz
             frequencies = np.arange(len(fft_values))
             
-            # Calculate percentile threshold
+            # --- Comparison Data ---
+            comp_row = None
+            comp_fft_values = []
+            if comparison_idx is not None and comparison_idx >= 0:
+                comp_row = df.iloc[comparison_idx]
+                comp_fft_values = [comp_row[col] for col in fft_cols if pd.notna(comp_row[col])]
+
+                # Align lengths if needed (though freq axis is index based 1Hz)
+                if len(comp_fft_values) > len(frequencies):
+                    comp_fft_values = comp_fft_values[:len(frequencies)]
+                elif len(comp_fft_values) < len(frequencies):
+                    comp_fft_values += [0] * (len(frequencies) - len(comp_fft_values))
+
+            # Calculate percentile threshold (Primary only for now)
             percentile_threshold = np.percentile(fft_values, percentile_value)
             
-            # Assign colors
-            if show_mqtt_calc:
-                 colors = [
-                    PASTEL_RED if val > percentile_threshold else PASTEL_BLUE
-                    for val in fft_values
-                ]
-            else:
-                 colors = PASTEL_BLUE
-            
-            # Create bar chart
-            fig = go.Figure(data=[
-                go.Bar(
+            # Create Figure
+            fig = go.Figure()
+
+            # Plot Primary (Blue)
+            # Use Bars for primary as before
+            fig.add_trace(go.Bar(
+                x=frequencies,
+                y=fft_values,
+                name="Primary",
+                marker_color=PASTEL_COLORS[0], # Blue
+                hovertemplate='<b>Primary</b><br>Freq: %{x:.1f} Hz<br>Amp: %{y:.4f}<extra></extra>'
+            ))
+
+            # Plot Comparison (Orange) - Overlay
+            if comp_fft_values:
+                fig.add_trace(go.Bar(
                     x=frequencies,
-                    y=fft_values,
-                    marker_color=colors,
-                    hovertemplate='Frequency: %{x:.1f} Hz<br>Magnitude: %{y:.4f}<extra></extra>'
-                )
-            ])
-            
-            # Add horizontal line for percentile if MQTT Optimization is ON
+                    y=comp_fft_values,
+                    name="Comparison",
+                    marker_color='rgba(230, 126, 34, 0.8)', # Orange with 0.8 opacity
+                    hovertemplate='<b>Comparison</b><br>Freq: %{x:.1f} Hz<br>Amp: %{y:.4f}<extra></extra>'
+                ))
+
+            # Add horizontal line for percentile
             if show_mqtt_calc:
                 fig.add_hline(
                     y=percentile_threshold,
                     line_dash="dash",
                     line_color="#e74c3c",
-                    annotation_text=f"{percentile_value}th percentile: {percentile_threshold:.4f}",
+                    annotation_text=f"{percentile_value}th: {percentile_threshold:.4f}",
                     annotation_position="top right"
                 )
             
             fft_type = row.get('type', 'acceleration')
             amplitude_unit = 'G' if fft_type == 'acceleration' else 'mm/s'
             
+            title_text = f"FFT Spectrum - Sample {primary_idx + 1}"
+            if comp_row is not None:
+                title_text += f" vs Sample {comparison_idx + 1}"
+
             fig.update_layout(
-                title=f"{title_prefix}FFT Spectrum - Sample {selected_idx + 1}",
+                title=title_text,
                 xaxis_title="Frequency (Hz)",
                 yaxis_title=f"Amplitude ({amplitude_unit})",
                 height=450,
                 margin=dict(l=50, r=50, t=50, b=50),
-                bargap=0
+                barmode='overlay', # Overlay bars
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                )
             )
             
-            st.plotly_chart(fig, key=f"fft_plot_{key_suffix}")
+            st.plotly_chart(fig, key=f"fft_plot_combined", width="stretch")
             
-            # Show statistics
-            peaks_above = sum(1 for val in fft_values if val > percentile_threshold)
+            # --- Statistics ---
+            # Helper for stats
+            def calc_stats(vals, thresh):
+                ground_vals = [v for v in vals if v <= thresh]
+                g_avg = sum(ground_vals) / len(ground_vals) if ground_vals else 0
+                peaks_abv = sum(1 for v in vals if v > thresh)
+                return {
+                    'max': max(vals) if vals else 0,
+                    'min': min(vals) if vals else 0,
+                    'mean': sum(vals)/len(vals) if vals else 0,
+                    'ground': g_avg,
+                    'peaks_count': peaks_abv
+                }
+
+            stats_prim = calc_stats(fft_values, percentile_threshold)
+            stats_comp = calc_stats(comp_fft_values, percentile_threshold) if comp_fft_values else None
+
+            # Display Stats
+            # We color code: Blue for Primary, Orange for Comparison
             
-            # Ground average: mean of values below or equal to the percentile threshold
-            ground_values = [val for val in fft_values if val <= percentile_threshold]
-            ground_average = sum(ground_values) / len(ground_values) if ground_values else 0
+            st.markdown("### Statistics")
             
-            num_metrics = 5 if show_mqtt_calc else 4
-            m_cols = st.columns(num_metrics)
-            with m_cols[0]:
-                st.metric("Max Amplitude", f"{max(fft_values):.4f}")
-            with m_cols[1]:
-                st.metric("Min Amplitude", f"{min(fft_values):.4f}")
-            with m_cols[2]:
-                st.metric("Mean Amplitude", f"{sum(fft_values)/len(fft_values):.4f}")
-            with m_cols[3]:
-                st.metric("Ground Average", f"{ground_average:.4f}")
+            # Metrics Columns
+            # We will show: Label | Primary | Comparison
+            
+            cols = st.columns(5)
+            labels = ["Max Amp", "Min Amp", "Mean Amp", "Ground Avg"]
+            keys = ['max', 'min', 'mean', 'ground']
+            
             if show_mqtt_calc:
-                with m_cols[4]:
-                    st.metric(f"Peaks > {percentile_value}th", peaks_above)
+                labels.append(f"Peaks > {percentile_value}th")
+                keys.append('peaks_count')
+
+            for i, (label, key) in enumerate(zip(labels, keys)):
+                with cols[i]:
+                    st.markdown(f"**{label}**")
+                    # Primary
+                    st.markdown(f"<div style='color:{PASTEL_COLORS[0]}; font-weight:bold; font-size:2.2rem; line-height:1.2;'>{stats_prim[key]:.4f}</div>", unsafe_allow_html=True)
+                    # Comparison
+                    if stats_comp:
+                        st.markdown(f"<div style='color:#E67E22; font-weight:bold; font-size:2.2rem; line-height:1.2;'>{stats_comp[key]:.4f}</div>", unsafe_allow_html=True)
+                    else:
+                        st.markdown("-")
+
+            
+            if show_mqtt_calc:
+                # MQTT Calc logic (Primary Only)
+                st.markdown("---")
+                st.subheader("MQTT Analysis (Primary)")
                 
-            if show_mqtt_calc:
                 # Construct optimized payload
-                # Format: {"ts": <unix_ts or 0>, "avg": <val>, "peaks": [[idx, val], ...]}
-                
-                # Get timestamps from row if available, else 0
                 ts_val = 0
                 if 'unix_start' in row and pd.notna(row['unix_start']):
                      ts_val = int(row['unix_start'])
 
-                # Find peaks (val > percentile, returning [freq, amplitude])
                 peaks_list = []
                 for i, val in enumerate(fft_values):
                     if val > percentile_threshold:
@@ -1133,68 +1182,70 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     "points": int(num_points),
                     "axis": row.get('axis', 'N/A'),
                     "ts": ts_val,
-                    "avg": float(round(ground_average, 2)),
+                    "avg": float(round(stats_prim['ground'], 2)),
                     "peaks": peaks_list
                 }
                 
                 json_str = json.dumps(payload, separators=(',', ':'))
                 payload_size = len(json_str)
 
-            # --- Top 5 Peaks Display ---
-            fft_np = np.array(fft_values)
-            local_max_indices = []
-            
-            if len(fft_np) >= 3:
-                # Find local maxima
-                for i in range(1, len(fft_np) - 1):
-                    if fft_np[i] > fft_np[i-1] and fft_np[i] > fft_np[i+1]:
-                        local_max_indices.append(i)
-                # Check endpoints
-                if fft_np[0] > fft_np[1]: local_max_indices.append(0)
-                if fft_np[-1] > fft_np[-2]: local_max_indices.append(len(fft_np)-1)
-            else:
-                local_max_indices = list(range(len(fft_np)))
-            
-            # Sort by amplitude (descending)
-            local_max_indices.sort(key=lambda idx: fft_np[idx], reverse=True)
-            top_peaks = local_max_indices[:5]
-            
-            st.caption("Dominant Frequencies (Top 5 Peaks)")
-            pk_cols = st.columns(5)
-            for i, col in enumerate(pk_cols):
-                with col:
-                    if i < len(top_peaks):
-                        p_idx = top_peaks[i]
-                        p_freq = frequencies[p_idx]
-                        p_amp = fft_np[p_idx]
-                        st.metric(f"Peak {i+1}", f"{int(p_freq)} Hz")
-                        st.markdown(f"<div style='margin-top:-15px; font-size:0.85rem; color:gray;'>Amp: {p_amp:.4f}</div>", unsafe_allow_html=True)
-                    else:
-                        st.metric(f"Peak {i+1}", "-")
-            # ---------------------------
-
-            if show_mqtt_calc:
-                
-                st.markdown("---")
-                st.subheader("MQTT Analysis")
                 c1, c2 = st.columns([1, 3])
                 with c1:
                     st.metric("Est. Payload Size", f"{payload_size} bytes")
-                    st.caption(f"Peaks sent: {len(peaks_list)}")
                 with c2:
                     with st.expander("View JSON Payload", expanded=False):
-                        st.text("Raw Compact JSON (One Line):")
                         st.code(json_str, language='json', line_numbers=False)
 
-                if mqtt_stats and update_global_stats:
-                     # Approximate total size for ALL FFT samples if they were sent
-                     # Use the size of the CURRENT displayed sample as the average
+                if update_global_stats and mqtt_stats:
                      total_fft_samples = len(df)
                      total_fft_bytes = payload_size * total_fft_samples
                      mqtt_stats.add("FFT", total_fft_bytes, total_fft_samples, f"{total_fft_samples} Samples | P{percentile_value} | {len(peaks_list)} Peaks")
+
+
+            # --- Top 5 Peaks Display ---
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("<div style='color:black; font-weight:bold; font-size:1.5rem; margin-bottom:10px;'>Dominant Frequencies (Top 5 Peaks)</div>", unsafe_allow_html=True)
+            
+            def get_top_peaks(vals, freqs):
+                vals_np = np.array(vals)
+                l_max = []
+                if len(vals_np) >= 3:
+                    for i in range(1, len(vals_np) - 1):
+                        if vals_np[i] > vals_np[i-1] and vals_np[i] > vals_np[i+1]:
+                            l_max.append(i)
+                    if vals_np[0] > vals_np[1]: l_max.append(0)
+                    if vals_np[-1] > vals_np[-2]: l_max.append(len(vals_np)-1)
+                else:
+                    l_max = list(range(len(vals_np)))
+                
+                l_max.sort(key=lambda x: vals_np[x], reverse=True)
+                return  l_max[:5]
+
+            p_peaks = get_top_peaks(fft_values, frequencies)
+            c_peaks = get_top_peaks(comp_fft_values, frequencies) if comp_fft_values else []
+
+            pk_cols = st.columns(5)
+            for i, col in enumerate(pk_cols):
+                with col:
+                    st.markdown(f"**Peak {i+1}**")
+                    # Primary
+                    if i < len(p_peaks):
+                        p_idx = p_peaks[i]
+                        st.markdown(f"<div style='color:{PASTEL_COLORS[0]}; font-weight:bold; font-size:1.5rem; line-height:1.2;'>{int(frequencies[p_idx])} Hz<br><span style='font-size:1rem; opacity:0.8;'>({fft_values[p_idx]:.3f})</span></div>", unsafe_allow_html=True)
+                    else:
+                         st.markdown("-")
+                    
+                    # Comparison
+                    if i < len(c_peaks):
+                        c_idx = c_peaks[i]
+                        st.markdown(f"<div style='color:#E67E22; font-weight:bold; font-size:1.5rem; line-height:1.2;'>{int(frequencies[c_idx])} Hz<br><span style='font-size:1rem; opacity:0.8;'>({comp_fft_values[c_idx]:.3f})</span></div>", unsafe_allow_html=True)
+                    elif comp_fft_values:
+                        st.markdown("-")
+
+        # --- UI Selection ---
+        st.subheader("FFT Analysis")
         
-        # First FFT viewer
-        st.subheader("Primary FFT")
+        # Primary Selector
         selected_idx_1 = st.selectbox(
             "Select FFT Sample",
             options=range(len(dropdown_options)),
@@ -1202,21 +1253,22 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             key="fft_selector_1",
             index=idx_x_acc
         )
-        plot_single_fft(selected_idx_1, "1", "", update_global_stats=True)
         
-        # Separator
-        st.markdown("---")
+        # Comparison Selector
+        # Add a "None" option
+        comp_options = [(-1, "None")] + dropdown_options
         
-        # Second FFT viewer for comparison
-        st.subheader("Comparison FFT")
-        selected_idx_2 = st.selectbox(
-            "Select FFT Sample for Comparison",
-            options=range(len(dropdown_options)),
-            format_func=lambda x: dropdown_options[x][1],
+        selected_comp_tuple = st.selectbox(
+            "Select Comparison FFT Sample (Optional)",
+            options=comp_options,
+            format_func=lambda x: x[1],
             key="fft_selector_2",
-            index=idx_x_vel  # Default to calculated X-vel or second sample
+            index=0 # Default to None
         )
-        plot_single_fft(selected_idx_2, "2", "Comparison: ", update_global_stats=False)    
+        selected_idx_2 = selected_comp_tuple[0]
+
+        # Plot
+        plot_fft_comparison(selected_idx_1, selected_idx_2, update_global_stats=True)
     # Common filters for subtabs 2 and 3
     # Get available axes and types
     available_axes = df['axis'].dropna().unique().tolist() if 'axis' in df.columns else ['X', 'Y', 'Z']
