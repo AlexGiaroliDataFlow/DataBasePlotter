@@ -1008,7 +1008,29 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             amplitude_str = f"{max_amplitude} G"
             
             label = f"{axis} | {amplitude_str} | {fft_type} | {num_points} Hz | {interval}"
+            label = f"{axis} | {amplitude_str} | {fft_type} | {num_points} Hz | {interval}"
             dropdown_options.append((idx, label))
+        
+        # Determine default indices for X Acc and X Vel
+        idx_x_acc = None
+        idx_x_vel = None
+        
+        for i, (orig_idx, _) in enumerate(dropdown_options):
+            r = df.iloc[orig_idx]
+            r_axis = r.get('axis', 'N/A')
+            r_type = r.get('type', 'N/A')
+            
+            if idx_x_acc is None and r_axis == 'X' and r_type == 'acceleration':
+                idx_x_acc = i
+            
+            if idx_x_vel is None and r_axis == 'X' and r_type == 'velocity':
+                idx_x_vel = i
+                
+            if idx_x_acc is not None and idx_x_vel is not None:
+                break
+        
+        if idx_x_acc is None: idx_x_acc = 0
+        if idx_x_vel is None: idx_x_vel = 1 if len(dropdown_options) > 1 else 0
         
         # Percentile selector - Uses value from sidebar slider (defined in main breakdown)
         percentile_value = st.session_state.get("percentile_slider", 90)
@@ -1156,7 +1178,8 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             "Select FFT Sample",
             options=range(len(dropdown_options)),
             format_func=lambda x: dropdown_options[x][1],
-            key="fft_selector_1"
+            key="fft_selector_1",
+            index=idx_x_acc
         )
         plot_single_fft(selected_idx_1, "1", "", update_global_stats=True)
         
@@ -1170,7 +1193,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             options=range(len(dropdown_options)),
             format_func=lambda x: dropdown_options[x][1],
             key="fft_selector_2",
-            index=min(1, len(dropdown_options) - 1)  # Default to second sample if available
+            index=idx_x_vel  # Default to calculated X-vel or second sample
         )
         plot_single_fft(selected_idx_2, "2", "Comparison: ", update_global_stats=False)    
     # Common filters for subtabs 2 and 3
@@ -1181,11 +1204,22 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
     with fft_tab2:
         st.subheader("FFT Heatmap Over Time")
         
+        # Default defaults for Heatmap
+        try:
+             def_axis_idx = available_axes.index('X')
+        except ValueError:
+             def_axis_idx = 0
+             
+        try:
+             def_type_idx = available_types.index('acceleration')
+        except ValueError:
+             def_type_idx = 0
+        
         col1, col2 = st.columns(2)
         with col1:
-            selected_axis_hm = st.selectbox("Select Axis", options=available_axes, key="heatmap_axis")
+            selected_axis_hm = st.selectbox("Select Axis", options=available_axes, key="heatmap_axis", index=def_axis_idx)
         with col2:
-            selected_type_hm = st.selectbox("Select Type", options=available_types, key="heatmap_type")
+            selected_type_hm = st.selectbox("Select Type", options=available_types, key="heatmap_type", index=def_type_idx)
         
         # Filter dataframe
         df_hm = df.copy()
