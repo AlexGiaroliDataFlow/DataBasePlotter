@@ -1322,21 +1322,34 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 interval = row.get('human_interval_of_analysis', f'Sample {idx}')
                 y_labels.append(str(interval))
             
+            custom_blue_scale = [
+                [0.0, "rgb(15, 25, 50)"],    # Deep Navy base
+                [0.15, "rgb(30, 80, 180)"],  # Smooth transition starts later
+                [0.4, "rgb(60, 140, 230)"],  # Rich Blue
+                [1.0, "rgb(160, 225, 255)"]  # Bright Blue highlight
+            ]
+            
             fig = go.Figure(data=go.Heatmap(
                 z=heatmap_data,
                 x=freqs_hm,
                 y=y_labels,
-                colorscale='Viridis',
-                colorbar=dict(title='Amplitude'),
+                colorscale=custom_blue_scale,
+                colorbar=dict(
+                    title='Amplitude',
+                    thickness=20,
+                    len=0.8,
+                    ticks='outside'
+                ),
                 hovertemplate='Frequency: %{x:.1f} Hz<br>Time: %{y}<br>Amplitude: %{z:.4f}<extra></extra>'
             ))
             
             fig.update_layout(
-                title=f"FFT Heatmap - Axis: {selected_axis_hm}, Type: {selected_type_hm}",
+                title=f"FFT Spectrogram Over Time - Axis: {selected_axis_hm}, Type: {selected_type_hm}",
                 xaxis_title="Frequency (Hz)",
                 yaxis_title="Time Interval",
-                height=max(400, len(heatmap_data) * 25),
-                margin=dict(l=50, r=50, t=50, b=50)
+                height=max(500, len(heatmap_data) * 25),
+                margin=dict(l=50, r=50, t=60, b=50),
+                hovermode='closest'
             )
             st.plotly_chart(fig, key="fft_heatmap", width="stretch")
             
@@ -1373,7 +1386,14 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 z=z_3d,
                 x=freqs_hm,
                 y=y_3d,
-                colorscale='Viridis'
+                colorscale=custom_blue_scale,
+                contours_z=dict(
+                    show=True,
+                    usecolormap=True,
+                    project_z=True,
+                    highlightcolor="white",
+                    highlightwidth=2
+                )
             )])
             
             fig_3d.update_layout(
@@ -1381,10 +1401,11 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 scene = dict(
                     xaxis_title='Frequency (Hz)',
                     yaxis_title='Time',
-                    zaxis_title='Amplitude'
+                    zaxis_title='Amplitude',
+                    camera=dict(eye=dict(x=1.5, y=1.5, z=1.2))
                 ),
-                height=600,
-                margin=dict(l=0, r=0, t=30, b=0)
+                height=700,
+                margin=dict(l=0, r=0, t=50, b=0)
             )
             st.plotly_chart(fig_3d, width="stretch", key="3d_fft_tab2")
 
