@@ -1042,16 +1042,8 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             # Extract FFT values
             fft_values = [row[col] for col in fft_cols if pd.notna(row[col])]
             
-            # Calculate Frequency Axis based on number_of_points
-            n_points_meta = row.get('number_of_points', len(fft_values))
-            try:
-                f_max = float(n_points_meta)
-            except:
-                f_max = float(len(fft_values))
-            
-            # Generate frequency array: 0 to f_max (exclusive)
-            # User requirement: number of points = range 0 to N Hz
-            frequencies = np.linspace(0, f_max, len(fft_values), endpoint=False)
+            # Generate frequency array: 0, 1, 2, ... N-1 Hz
+            frequencies = np.arange(len(fft_values))
             
             # Calculate percentile threshold
             percentile_threshold = np.percentile(fft_values, percentile_value)
@@ -1248,15 +1240,8 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             y_labels = []
             
             # Determine Frequency Axis for Heatmap
-            # We'll use the FIRST row's definition for the X-axis of the heatmap to ensure consistency
-            first_row = df_hm.iloc[0]
-            n_points_hm = first_row.get('number_of_points', len(fft_cols))
-            try:
-                f_max_hm = float(n_points_hm)
-            except:
-                f_max_hm = float(len(fft_cols))
-            
-            freqs_hm = np.linspace(0, f_max_hm, len(fft_cols), endpoint=False)
+            # User requirement: Always 1Hz resolution, index = frequency
+            freqs_hm = np.arange(len(fft_cols))
             
             for idx, row in df_hm.iterrows():
                 fft_vals = [row[col] if pd.notna(row[col]) else 0 for col in fft_cols]
@@ -1286,12 +1271,27 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             st.subheader("3D Surface Evolution")
             
             # Prepare data for 3D plot (using same data as heatmap)
-            # Limit samples for 3D performance if too many
-            MAX_3D_SAMPLES = 60
-            if len(heatmap_data) > MAX_3D_SAMPLES:
-                st.info(f"Displaying last {MAX_3D_SAMPLES} samples for 3D performance.")
-                z_3d = heatmap_data[-MAX_3D_SAMPLES:]
-                y_3d = y_labels[-MAX_3D_SAMPLES:]
+            # Limit samples for 3D performance if too many, but allow navigation
+            MAX_3D_SAMPLES = 50
+            total_heatmap_samples = len(heatmap_data)
+            
+            if total_heatmap_samples > MAX_3D_SAMPLES:
+                # Slider to select the starting index for the 50 samples window
+                start_index_3d = st.slider(
+                    "Navigate 3D History (Start Sample)",
+                    min_value=0,
+                    max_value=total_heatmap_samples - MAX_3D_SAMPLES,
+                    value=max(0, total_heatmap_samples - MAX_3D_SAMPLES), # Default to latest
+                    step=1,
+                    key="fft_3d_slider",
+                    help=f"Select the starting sample for the 3D plot. Shows {MAX_3D_SAMPLES} samples."
+                )
+                end_index_3d = start_index_3d + MAX_3D_SAMPLES
+                
+                st.info(f"Displaying samples {start_index_3d} to {end_index_3d} (of {total_heatmap_samples})")
+                
+                z_3d = heatmap_data[start_index_3d:end_index_3d]
+                y_3d = y_labels[start_index_3d:end_index_3d]
             else:
                 z_3d = heatmap_data
                 y_3d = y_labels
@@ -1338,16 +1338,10 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             timestamps = []
             spectra = []
             
-            # Calculate Frequencies for first row (Assuming const for filtered set)
-            first_row_adv = df_adv.iloc[0]
-            n_points_adv = first_row_adv.get('number_of_points', len(fft_cols))
-            try:
-                f_max_adv = float(n_points_adv)
-            except:
-                f_max_adv = float(len(fft_cols))
-            
-            freqs_adv = np.linspace(0, f_max_adv, len(fft_cols), endpoint=False)
-            hz_per_bin = f_max_adv / len(fft_cols)
+            # Calculate Frequencies for first row
+            # User requirement: Always 1Hz resolution, index = frequency
+            freqs_adv = np.arange(len(fft_cols))
+            hz_per_bin = 1.0
             
             for idx, row in df_adv.iterrows():
                 vals = [row[col] if pd.notna(row[col]) else 0 for col in fft_cols]
