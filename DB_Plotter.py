@@ -951,6 +951,8 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
     
     # Get FFT columns (p_0 to p_999)
     fft_cols = [col for col in df.columns if col.startswith('p_')]
+    # Ensure columns are sorted numerically (p_0, p_1, ..., p_10, ...)
+    fft_cols = sorted(fft_cols, key=lambda x: int(x.split('_')[1]))
     
     if not fft_cols:
         st.warning("No FFT columns found.")
@@ -1314,10 +1316,20 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             
             # Determine Frequency Axis for Heatmap
             # User requirement: Always 1Hz resolution, index = frequency
-            freqs_hm = np.arange(len(fft_cols))
+            
+            # Determine max points based on number_of_points
+            max_freq_points = len(fft_cols)
+            if 'number_of_points' in df_hm.columns and not df_hm['number_of_points'].dropna().empty:
+                 max_freq_points = int(df_hm['number_of_points'].max())
+            
+            # Ensure we don't go out of bounds
+            max_freq_points = min(max_freq_points, len(fft_cols))
+            
+            freqs_hm = np.arange(max_freq_points)
+            cols_hm = fft_cols[:max_freq_points]
             
             for idx, row in df_hm.iterrows():
-                fft_vals = [row[col] if pd.notna(row[col]) else 0 for col in fft_cols]
+                fft_vals = [row[col] if pd.notna(row[col]) else 0 for col in cols_hm]
                 heatmap_data.append(fft_vals)
                 interval = row.get('human_interval_of_analysis', f'Sample {idx}')
                 y_labels.append(str(interval))
