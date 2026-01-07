@@ -1126,14 +1126,14 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 peaks_list = []
                 for i, val in enumerate(fft_values):
                     if val > percentile_threshold:
-                        peaks_list.append([round(frequencies[i], 1), round(val, 2)])
+                        peaks_list.append([float(round(frequencies[i], 1)), float(round(val, 2))])
                 
                 payload = {
                     "type": "acc" if row.get('type') == 'acceleration' else ("vel" if row.get('type') == 'velocity' else row.get('type', 'N/A')),
                     "points": int(num_points),
                     "axis": row.get('axis', 'N/A'),
                     "ts": ts_val,
-                    "avg": round(ground_average, 2),
+                    "avg": float(round(ground_average, 2)),
                     "peaks": peaks_list
                 }
                 
