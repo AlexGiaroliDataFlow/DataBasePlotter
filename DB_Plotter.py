@@ -124,10 +124,10 @@ EXCLUDE_METADATA_COLS = ['id_day', 'id', 'status', 'human_timestamp', 'unix_time
 
 # Vivid pastel color palette (more saturated)
 PASTEL_COLORS = [
-    '#F4D03F',  # vivid yellow (swapped from idx 3)
+    '#F4D03F',  # vivid yellow
     '#E74C3C',  # vivid red
     '#58D68D',  # vivid green
-    '#5DADE2',  # vivid blue (swapped from idx 0)
+    '#5DADE2',  # vivid blue
     '#AF7AC5',  # vivid purple
     '#E67E22',  # vivid orange
     '#3498DB',  # strong blue
@@ -136,6 +136,38 @@ PASTEL_COLORS = [
     '#F5B041',  # amber
     '#9B59B6',  # purple
     '#EB984E',  # orange
+]
+
+# Reordered palette for sensors/power analyzer (starts with blue instead of yellow)
+# Expanded with many more distinct colors to avoid repetition
+SENSOR_COLORS = [
+    '#5DADE2',  # vivid blue
+    '#E74C3C',  # vivid red
+    '#58D68D',  # vivid green
+    '#AF7AC5',  # vivid purple
+    '#E67E22',  # vivid orange
+    '#3498DB',  # strong blue
+    '#EC7063',  # coral red
+    '#45B39D',  # teal green
+    '#F5B041',  # amber
+    '#9B59B6',  # purple
+    '#EB984E',  # orange
+    '#48C9B0',  # turquoise
+    '#F1948A',  # light coral
+    '#85C1E2',  # sky blue
+    '#F8B739',  # golden yellow
+    '#BB8FCE',  # lavender
+    '#52BE80',  # emerald
+    '#F0B27A',  # light orange
+    '#5499C7',  # steel blue
+    '#CD6155',  # dark coral
+    '#7DCEA0',  # mint green
+    '#D7BDE2',  # pale purple
+    '#F7DC6F',  # bright yellow
+    '#76D7C4',  # aquamarine
+    '#EC407A',  # pink
+    '#AED6F1',  # powder blue
+    '#F4D03F',  # vivid yellow (moved to end)
 ]
 
 PASTEL_BLUE = '#5DADE2'
@@ -391,7 +423,7 @@ def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool 
     # Create individual plots for each sensor
     for idx, col in enumerate(valid_cols):
         try:
-            line_color = PASTEL_COLORS[idx % len(PASTEL_COLORS)]
+            line_color = SENSOR_COLORS[idx % len(SENSOR_COLORS)]
             
             # Create separate figure
             fig = go.Figure()
@@ -609,7 +641,7 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
             else:
                 y_label = col
                 
-            line_color = PASTEL_COLORS[idx % len(PASTEL_COLORS)]
+            line_color = SENSOR_COLORS[idx % len(SENSOR_COLORS)]
             
             # New Figure
             fig = go.Figure()
@@ -851,7 +883,8 @@ def plot_tilt_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = 
     if 'tilt_angle' not in df_filtered.columns:
         return df_filtered, []
 
-    tilt_color = PASTEL_COLORS[4]  # vivid purple
+    # Use a unique color from the extended palette (turquoise - not used by typical sensors)
+    tilt_color = SENSOR_COLORS[11]  # turquoise
     
     try:
         # Calculate moving average
