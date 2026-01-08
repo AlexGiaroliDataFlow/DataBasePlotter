@@ -616,10 +616,10 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
     
     # Plot grouped metrics
     groups = [
-        ("Current Measurements", current_cols),
-        ("Voltage and Frequency", voltage_cols),
-        ("Power System (kW/kVA/kVAR)", power_system_cols),
-        ("Total Harmonic Distortion (THD)", thd_cols),
+        ("Current", current_cols),
+        ("Voltage", voltage_cols),
+        ("Power", power_system_cols),
+        ("Total Harmonic Distortion", thd_cols),
         ("Other Measurements", other_cols)
     ]
     
