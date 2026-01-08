@@ -1239,6 +1239,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     y=comp_fft_values,
                     name="Comparison",
                     marker_color=comp_colors,
+                    opacity=0.75,
                     hovertemplate='<b>Comparison</b><br>Freq: %{x:.0f} Hz<br>Amp: %{y:.4f}<extra></extra>'
                 ))
 
