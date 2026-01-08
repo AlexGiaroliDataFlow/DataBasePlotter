@@ -138,6 +138,28 @@ PASTEL_COLORS = [
     '#EB984E',  # orange
 ]
 
+def adjust_color_brightness(hex_color, factor):
+    """
+    Adjusts the brightness of a HEX color.
+    factor > 1 lightens the color.
+    factor < 1 darkens the color.
+    """
+    if not isinstance(hex_color, str) or not hex_color.startswith('#'):
+        return hex_color
+        
+    hex_color = hex_color.lstrip('#')
+    if len(hex_color) == 6:
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        
+        r = int(max(0, min(255, r * factor)))
+        g = int(max(0, min(255, g * factor)))
+        b = int(max(0, min(255, b * factor)))
+        
+        return f'#{r:02x}{g:02x}{b:02x}'
+    return f"#{hex_color}"
+
 # Reordered palette for sensors/power analyzer (starts with blue instead of yellow)
 # Expanded with many more distinct colors to avoid repetition
 SENSOR_COLORS = [
@@ -1091,9 +1113,10 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             # --- Primary Colors ---
             primary_colors = p_col
             if show_mqtt_calc:
-                darker_blue = '#2874A6' # Keep this for MQTT logic or adjust if needed, but simplest is to stick to static for now or derive
-                # If dynamic color is critical for MQTT gradient, we might need more logic, but for now let's apply the chosen color
-                primary_colors = [darker_blue if v > primary_threshold else p_col for v in fft_values]
+                # darker_blue = '#2874A6' # Updated to dynamic
+                # Use dynamic darker color for peaks
+                darker_p = adjust_color_brightness(p_col, 0.6) 
+                primary_colors = [darker_p if v > primary_threshold else p_col for v in fft_values]
 
             # Plot Primary
             fig.add_trace(go.Bar(
@@ -1108,8 +1131,9 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             if comp_fft_values:
                 comp_colors = c_col
                 if show_mqtt_calc:
-                    darker_orange = 'rgba(168, 67, 0, 0.9)'
-                    comp_colors = [darker_orange if v > comp_threshold else c_col for v in comp_fft_values]
+                    # darker_orange = 'rgba(168, 67, 0, 0.9)' # Updated to dynamic
+                    darker_c = adjust_color_brightness(c_col, 0.6)
+                    comp_colors = [darker_c if v > comp_threshold else c_col for v in comp_fft_values]
 
                 fig.add_trace(go.Bar(
                     x=frequencies,
@@ -1156,7 +1180,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     dtick=target_dtick
                 ),
                 yaxis_title=f"Amplitude ({amplitude_unit})",
-                height=450,
+                height=600,
                 margin=dict(l=50, r=50, t=50, b=50),
                 barmode='overlay', # Overlay bars
                 legend=dict(
