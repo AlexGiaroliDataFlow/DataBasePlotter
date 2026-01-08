@@ -1060,7 +1060,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
         percentile_value = st.session_state.get("percentile_slider", 90)
         
         # Helper function to plot FFT with optional comparison
-        def plot_fft_comparison(primary_idx: int, comparison_idx: int = None, update_global_stats: bool = False):
+        def plot_fft_comparison(primary_idx: int, comparison_idx: int = None, update_global_stats: bool = False, p_col=PASTEL_COLORS[3], c_col='#E67E22'):
             # --- Primary Data ---
             row = df.iloc[primary_idx]
             num_points = row.get('number_of_points', fft_num_points)
@@ -1089,10 +1089,11 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             fig = go.Figure()
 
             # --- Primary Colors ---
-            primary_colors = PASTEL_COLORS[3]
+            primary_colors = p_col
             if show_mqtt_calc:
-                darker_blue = '#2874A6'
-                primary_colors = [darker_blue if v > primary_threshold else PASTEL_COLORS[3] for v in fft_values]
+                darker_blue = '#2874A6' # Keep this for MQTT logic or adjust if needed, but simplest is to stick to static for now or derive
+                # If dynamic color is critical for MQTT gradient, we might need more logic, but for now let's apply the chosen color
+                primary_colors = [darker_blue if v > primary_threshold else p_col for v in fft_values]
 
             # Plot Primary
             fig.add_trace(go.Bar(
@@ -1105,10 +1106,10 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
 
             # --- Comparison Colors ---
             if comp_fft_values:
-                comp_colors = 'rgba(230, 126, 34, 0.8)' # Default Orange
+                comp_colors = c_col
                 if show_mqtt_calc:
                     darker_orange = 'rgba(168, 67, 0, 0.9)'
-                    comp_colors = [darker_orange if v > comp_threshold else 'rgba(230, 126, 34, 0.8)' for v in comp_fft_values]
+                    comp_colors = [darker_orange if v > comp_threshold else c_col for v in comp_fft_values]
 
                 fig.add_trace(go.Bar(
                     x=frequencies,
@@ -1123,7 +1124,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 fig.add_hline(
                     y=primary_threshold,
                     line_dash="dot",
-                    line_color=PASTEL_COLORS[3],
+                    line_color=p_col,
                     annotation_text=f"Primary {percentile_value}th: {primary_threshold:.4f}",
                     annotation_position="top right"
                 )
@@ -1131,7 +1132,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     fig.add_hline(
                         y=comp_threshold,
                         line_dash="dot",
-                        line_color="#E67E22",
+                        line_color=c_col,
                         annotation_text=f"Comp {percentile_value}th: {comp_threshold:.4f}",
                         annotation_position="bottom right"
                     )
@@ -1205,27 +1206,52 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
 
             for i, (label, key) in enumerate(zip(labels, keys)):
                 with cols[i]:
-                    st.markdown(f"{label}")
-                    
-                    # Format logic: integer for peaks_count, float for others
-                    p_val_str = f"{int(stats_prim[key])}" if key == 'peaks_count' else f"{stats_prim[key]:.4f}"
-                    
-                    # Primary
-                    st.markdown(f"<div style='color:{PASTEL_COLORS[3]}; font-size:2.8rem; line-height:1.2;'>{p_val_str}</div>", unsafe_allow_html=True)
-                    
-                    # Comparison
-                    if stats_comp:
-                        c_val_str = f"{int(stats_comp[key])}" if key == 'peaks_count' else f"{stats_comp[key]:.4f}"
-                        st.markdown(f"<div style='color:#E67E22; font-size:2.8rem; line-height:1.2;'>{c_val_str}</div>", unsafe_allow_html=True)
+                    # Format logic: integer for peaks_count, float for others with unit
+                    if key == 'peaks_count':
+                         p_val_str = f"{int(stats_prim[key])}"
                     else:
-                        st.markdown("-")
+                         p_val_str = f"{stats_prim[key]:.4f} {amplitude_unit}"
+
+                    c_val_str = "-"
+                    
+                    if stats_comp:
+                        if key == 'peaks_count':
+                             c_val_str = f"{int(stats_comp[key])}"
+                        else:
+                             c_val_str = f"{stats_comp[key]:.4f} {amplitude_unit}"
+                    
+                    # Create a card-like container
+                    card_html = f"""
+                    <div style="
+                        border: 1px solid #e0e0e0;
+                        border-radius: 8px;
+                        padding: 10px;
+                        background-color: rgba(245, 245, 245, 0.2);
+                        text-align: center;
+                        margin-bottom: 10px;
+                    ">
+                        <div style="
+                            color: #555; 
+                            font-size: 0.9rem; 
+                            margin-bottom: 8px; 
+                            padding-bottom: 5px; 
+                            font-weight: 500; 
+                            border-bottom: 1px solid #ddd;
+                        ">{label}</div>
+                        <!-- Primary -->
+                        <div style="color:{p_col}; font-size:2.2rem; line-height:1.2;">{p_val_str}</div>
+                        <!-- Comparison -->
+                        <div style="color:{c_col}; font-size:2.2rem; line-height:1.2; margin-top: 5px;">{c_val_str if stats_comp else '<span style="color:#ccc; font-size:1.5rem;">-</span>'}</div>
+                    </div>
+                    """
+                    st.markdown(card_html, unsafe_allow_html=True)
 
             
 
 
             # --- Top 5 Peaks Display ---
             st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("<div style='color:black; font-size:2.0rem; margin-bottom:10px;'>Dominant Frequencies (Top 5 Peaks)</div>", unsafe_allow_html=True)
+            st.markdown("<div style='color:black; font-size:2.0rem; margin-bottom:10px;'>Dominant Frequencies</div>", unsafe_allow_html=True)
             
             def get_top_peaks(vals, freqs):
                 vals_np = np.array(vals)
@@ -1248,20 +1274,52 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             pk_cols = st.columns(5)
             for i, col in enumerate(pk_cols):
                 with col:
-                    st.markdown(f"Peak {i+1}")
-                    # Primary
+                    # Prepare content
+                    peak_label = f"Peak {i+1}"
+                    
+                    # Primary Content
+                    p_content = "-"
                     if i < len(p_peaks):
                         p_idx = p_peaks[i]
-                        st.markdown(f"<div style='color:{PASTEL_COLORS[3]}; font-size:1.8rem; line-height:1.2;'>{int(frequencies[p_idx])} Hz<br><span style='font-size:1.1rem; opacity:0.8;'>({fft_values[p_idx]:.3f})</span></div>", unsafe_allow_html=True)
-                    else:
-                         st.markdown("-")
+                        p_content = f"{int(frequencies[p_idx])} Hz<br><span style='font-size:1.0rem; opacity:0.8;'>({fft_values[p_idx]:.3f} {amplitude_unit})</span>"
                     
-                    # Comparison
-                    if i < len(c_peaks):
-                        c_idx = c_peaks[i]
-                        st.markdown(f"<div style='color:#E67E22; font-size:1.8rem; line-height:1.2;'>{int(frequencies[c_idx])} Hz<br><span style='font-size:1.1rem; opacity:0.8;'>({comp_fft_values[c_idx]:.3f})</span></div>", unsafe_allow_html=True)
-                    elif comp_fft_values:
-                        st.markdown("-")
+                    # Comparison Content
+                    c_content = "-"
+                    if stats_comp:
+                        if i < len(c_peaks):
+                            c_idx = c_peaks[i]
+                            c_content = f"{int(frequencies[c_idx])} Hz<br><span style='font-size:1.0rem; opacity:0.8;'>({comp_fft_values[c_idx]:.3f} {amplitude_unit})</span>"
+                        else:
+                            c_content = "-" # Placeholder if comp exists but no peak this far
+                    elif i == 0 and not stats_comp: # Only show dash for first if no comp, or handled by logic below
+                         pass
+
+                    # Build Card
+                    card_html = f"""
+                    <div style="
+                        border: 1px solid #e0e0e0;
+                        border-radius: 8px;
+                        padding: 10px;
+                        background-color: rgba(245, 245, 245, 0.2);
+                        text-align: center;
+                    ">
+                        <div style="
+                            color: #555; 
+                            font-size: 0.9rem; 
+                            margin-bottom: 8px; 
+                            padding-bottom: 5px;
+                            font-weight: 500; 
+                            border-bottom: 1px solid #ddd;
+                        ">{peak_label}</div>
+                        <!-- Primary -->
+                        <div style="color:{p_col}; font-size:1.6rem; line-height:1.2;">{p_content}</div>
+                        <!-- Comparison -->
+                        <div style="color:{c_col}; font-size:1.6rem; line-height:1.2; margin-top: 5px;">
+                            {c_content if stats_comp else '<span style="color:#ccc; font-size:1.5rem; display:none;">-</span>'}
+                        </div>
+                    </div>
+                    """
+                    st.markdown(card_html, unsafe_allow_html=True)
 
             if show_mqtt_calc:
                 # MQTT Calc logic (Primary Only)
@@ -1306,29 +1364,38 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
         st.subheader("FFT Analysis")
         
         # Primary Selector
-        selected_idx_1 = st.selectbox(
-            "Select FFT Sample",
-            options=range(len(dropdown_options)),
-            format_func=lambda x: dropdown_options[x][1],
-            key="fft_selector_1",
-            index=idx_x_acc
-        )
+        col_p1, col_p2 = st.columns([0.85, 0.15])
+        with col_p1:
+            selected_idx_1 = st.selectbox(
+                "Primary FFT Sample",
+                options=range(len(dropdown_options)),
+                format_func=lambda x: dropdown_options[x][1],
+                key="fft_selector_1",
+                index=idx_x_acc
+            )
+        with col_p2:
+            p_color_choice = st.color_picker("Primary", value=PASTEL_COLORS[3], key="p_color_picker", label_visibility="hidden")
         
         # Comparison Selector
         # Add a "None" option
         comp_options = [(-1, "None")] + dropdown_options
         
-        selected_comp_tuple = st.selectbox(
-            "Select Comparison FFT Sample (Optional)",
-            options=comp_options,
-            format_func=lambda x: x[1],
-            key="fft_selector_2",
-            index=0 # Default to None
-        )
+        col_c1, col_c2 = st.columns([0.85, 0.15])
+        with col_c1:
+            selected_comp_tuple = st.selectbox(
+                "Comparison FFT Sample",
+                options=comp_options,
+                format_func=lambda x: x[1],
+                key="fft_selector_2",
+                index=0 # Default to None
+            )
+        with col_c2:
+            c_color_choice = st.color_picker("Compare", value='#E67E22', key="c_color_picker", label_visibility="hidden")
+            
         selected_idx_2 = selected_comp_tuple[0]
 
         # Plot
-        plot_fft_comparison(selected_idx_1, selected_idx_2, update_global_stats=True)
+        plot_fft_comparison(selected_idx_1, selected_idx_2, update_global_stats=True, p_col=p_color_choice, c_col=c_color_choice)
     # Common filters for subtabs 2 and 3
     # Get available axes and types
     available_axes = df['axis'].dropna().unique().tolist() if 'axis' in df.columns else ['X', 'Y', 'Z']
