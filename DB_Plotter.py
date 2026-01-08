@@ -1143,9 +1143,17 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             if comp_row is not None:
                 title_text += f" vs Sample {comparison_idx + 1}"
 
+            # X-AXIS LABELS
+            target_dtick = 25
+
             fig.update_layout(
                 title=title_text,
-                xaxis_title="Frequency (Hz)",
+                xaxis=dict(
+                    title="Frequency (Hz)",
+                    tickmode='linear',
+                    tick0=0,
+                    dtick=target_dtick
+                ),
                 yaxis_title=f"Amplitude ({amplitude_unit})",
                 height=450,
                 margin=dict(l=50, r=50, t=50, b=50),
