@@ -651,17 +651,27 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
             
             row_num = idx + 1
             
-             # Determine unit label
-            if col in power_cols_kilo:
-                if col == 'Psys':
-                    unit = 'kW'
-                elif col == 'Qsys':
-                     unit = 'kVAR'
-                else:
-                     unit = 'kVA'
-                y_label = f"{col} ({unit})"
+            # Determine labels and titles
+            group_title = definition['group']
+            
+            if col == 'f':
+                display_name = "Frequency"
+                plot_title = "Frequency"
+                y_label = "Frequency"
             else:
-                y_label = col
+                display_name = col
+                plot_title = f"{col} ({group_title})"
+                
+                if col in power_cols_kilo:
+                    if col == 'Psys':
+                        unit = 'kW'
+                    elif col == 'Qsys':
+                         unit = 'kVAR'
+                    else:
+                         unit = 'kVA'
+                    y_label = f"{col} ({unit})"
+                else:
+                    y_label = col
                 
             line_color = SENSOR_COLORS[idx % len(SENSOR_COLORS)]
             
@@ -673,10 +683,10 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
                 x=df_filtered[x_axis],
                 y=df_filtered[col],
                 mode='lines',
-                name=col,
+                name=display_name,
                 line=dict(color=line_color, width=1),
                 opacity=0.7,
-                hovertemplate=f'{col}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                hovertemplate=f'{display_name}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
             ))
             
             # Calculate Moving Average
@@ -688,15 +698,13 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
                 x=df_filtered[x_axis],
                 y=col_avg,
                 mode='lines',
-                name=f'{col} Avg',
+                name=f'{display_name} Avg',
                 line=dict(color=line_color, width=2.5),
-                hovertemplate=f'{col} Avg: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                hovertemplate=f'{display_name} Avg: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
             ))
             
-            group_title = definition['group']
-            
             fig.update_layout(
-                 title=f"{col} ({group_title})",
+                 title=plot_title,
                  height=300,
                  margin=dict(l=20, r=20, t=40, b=20),
                  showlegend=True,
