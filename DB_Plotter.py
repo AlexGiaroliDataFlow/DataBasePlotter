@@ -821,7 +821,6 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
         duration_sec = max(1.0, duration_sec)
         
         # 3. Construct all Payloads
-        # 3. Construct all Payloads
         visible_cols_set = set()
         visible_cols = []
         for d in plot_definitions:
@@ -1157,7 +1156,6 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             amplitude_str = f"{max_amplitude} G"
             
             label = f"{axis} | {amplitude_str} | {fft_type} | {num_points} Hz | {interval}"
-            label = f"{axis} | {amplitude_str} | {fft_type} | {num_points} Hz | {interval}"
             dropdown_options.append((idx, label))
         
         # Determine default indices for X Acc and X Vel
@@ -1216,7 +1214,6 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             # --- Primary Colors ---
             primary_colors = p_col
             if show_mqtt_calc:
-                # darker_blue = '#2874A6' # Updated to dynamic
                 # Use dynamic darker color for peaks
                 darker_p = adjust_color_brightness(p_col, 0.6) 
                 primary_colors = [darker_p if v > primary_threshold else p_col for v in fft_values]
@@ -1234,7 +1231,6 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             if comp_fft_values:
                 comp_colors = c_col
                 if show_mqtt_calc:
-                    # darker_orange = 'rgba(168, 67, 0, 0.9)' # Updated to dynamic
                     darker_c = adjust_color_brightness(c_col, 0.6)
                     comp_colors = [darker_c if v > comp_threshold else c_col for v in comp_fft_values]
 
@@ -2188,10 +2184,6 @@ def main():
             
             # Apply same filter to tilt if it exists
             if not df_tilt_raw.empty and 'datetime' in df_sensors_filtered.columns and 'datetime' in df_tilt_raw.columns:
-                # Use the actual selected range values from the slider which is stored in session state by key
-                # but create_date_range_slider already returns the filtered df.
-                # However, it doesn't return the date_range values. 
-                # Let's get the range from the slider key manually to filter tilt.
                 key = "sensor_unified_range"
                 if key in st.session_state:
                     date_range = st.session_state[key]
@@ -2203,8 +2195,6 @@ def main():
                 df_tilt_filtered = df_tilt_raw.copy()
 
             # Plot Sensors
-            # Pass show_mqtt_calc=False to sensors plot so it doesn't duplicate the MQTT display
-            # We will use the Combined display for this tab
             res = plot_sensor_data(df_sensors_filtered, x_axis_res, show_quality, False, mqtt_interval, mqtt_stats)
             if res:
                 df_sensor_res, cols_sensor_res, x_axis_res = res
