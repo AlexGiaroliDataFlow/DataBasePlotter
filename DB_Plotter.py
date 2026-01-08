@@ -1010,6 +1010,101 @@ def plot_tilt_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = 
                  
     return df_filtered, ['tilt_angle'] if 'tilt_angle' in df_filtered.columns else []
 
+def render_fault_guide():
+    """Renders a hidden-by-default guide for pump fault analysis."""
+    with st.expander("Diagnostic Guide (Spectral Signatures)", expanded=False):
+        st.markdown("""
+        <style>
+        .fault-card {
+            background-color: #F0F2F6;
+            border-left: 6px solid #ccc;
+            padding: 12px;
+            margin-bottom: 12px;
+            border-radius: 6px;
+        }
+        .fault-title {
+            font-size: 1.05em;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .fault-desc {
+            font-size: 0.9em;
+            color: #333;
+            line-height: 1.4;
+        }
+        .fault-cause {
+            font-size: 0.85em;
+            color: #555;
+            font-style: italic;
+            margin-top: 4px;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("""
+            <div class="fault-card" style="border-left-color: #3498DB;">
+                <div class="fault-title" style="color: #3498DB;">Unbalance</div>
+                <div class="fault-desc">
+                    Dominant peak at <b>1x RPM</b> (Rotation Speed).<br>
+                    Prevalent in Radial direction.
+                </div>
+                <div class="fault-cause">Cause: Dirt accumulation, impeller wear, missing weights.</div>
+            </div>
+            
+            <div class="fault-card" style="border-left-color: #E67E22;">
+                <div class="fault-title" style="color: #E67E22;">Misalignment</div>
+                <div class="fault-desc">
+                    Peaks at <b>1x and 2x RPM</b> (often 2x > 1x).<br>
+                    Strong Axial component.
+                </div>
+                <div class="fault-cause">Cause: Shafts not aligned, soft foot.</div>
+            </div>
+            
+             <div class="fault-card" style="border-left-color: #F1C40F;">
+                <div class="fault-title" style="color: #F1C40F;">Electrical Faults</div>
+                <div class="fault-desc">
+                   Peak at line frequency (50Hz) and harmonics.<br>
+                   Sidebands around 1x RPM.
+                </div>
+                <div class="fault-cause">Cause: Broken rotor bars, stator eccentricity.</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with c2:
+            st.markdown("""
+            <div class="fault-card" style="border-left-color: #E74C3C;">
+                <div class="fault-title" style="color: #E74C3C;">Looseness</div>
+                <div class="fault-desc">
+                    Series of harmonics (<b>1x, 2x, 3x... 10x</b>).<br>
+                    Elevated noise floor.
+                </div>
+                <div class="fault-cause">Cause: Loose bolts, structural cracks, excessive clearance.</div>
+            </div>
+            
+            <div class="fault-card" style="border-left-color: #9B59B6;">
+                <div class="fault-title" style="color: #9B59B6;">Bearing Faults</div>
+                <div class="fault-desc">
+                    Non-synchronous peaks at <b>high frequency</b>.<br>
+                    Energy "mound" or noise carpet.
+                </div>
+                <div class="fault-cause">Cause: Race/ball wear, poor lubrication.</div>
+            </div>
+            
+            <div class="fault-card" style="border-left-color: #2ECC71;">
+                <div class="fault-title" style="color: #2ECC71;">Cavitation / Flow</div>
+                <div class="fault-desc">
+                    Broadband noise (random) at medium-high frequencies.<br>
+                    Unstable/fluctuating amplitudes.
+                </div>
+                <div class="fault-cause">Cause: Operation off-curve, suction problems.</div>
+            </div>
+            """, unsafe_allow_html=True)
+
 def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: bool = True, mqtt_stats: 'MqttStats' = None):
     """Create interactive bar charts for FFT data."""
     if df.empty:
@@ -1516,60 +1611,64 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             st.plotly_chart(fig, key="fft_heatmap", width="stretch")
             
             st.markdown("---")
-            st.subheader("3D Surface Evolution")
             
-            # Prepare data for 3D plot (using same data as heatmap)
-            # Limit samples for 3D performance if too many, but allow navigation
-            MAX_3D_SAMPLES = 50
-            total_heatmap_samples = len(heatmap_data)
-            
-            if total_heatmap_samples > MAX_3D_SAMPLES:
-                # Slider to select the starting index for the 50 samples window
-                start_index_3d = st.slider(
-                    "Navigate 3D History (Start Sample)",
-                    min_value=0,
-                    max_value=total_heatmap_samples - MAX_3D_SAMPLES,
-                    value=max(0, total_heatmap_samples - MAX_3D_SAMPLES), # Default to latest
-                    step=1,
-                    key="fft_3d_slider",
-                    help=f"Select the starting sample for the 3D plot. Shows {MAX_3D_SAMPLES} samples."
+            with st.expander("3D Surface Evolution", expanded=False):
+                # Prepare data for 3D plot (using same data as heatmap)
+                # Limit samples for 3D performance if too many, but allow navigation
+                MAX_3D_SAMPLES = 50
+                total_heatmap_samples = len(heatmap_data)
+                
+                if total_heatmap_samples > MAX_3D_SAMPLES:
+                    # Slider inside expander
+                    start_index_3d = st.slider(
+                        "Navigate 3D History (Start Sample)",
+                        min_value=0,
+                        max_value=total_heatmap_samples - MAX_3D_SAMPLES,
+                        value=max(0, total_heatmap_samples - MAX_3D_SAMPLES), # Default to latest
+                        step=1,
+                        key="fft_3d_slider",
+                        help=f"Select the starting sample for the 3D plot. Shows {MAX_3D_SAMPLES} samples."
+                    )
+                    end_index_3d = start_index_3d + MAX_3D_SAMPLES
+                    
+                    st.info(f"Displaying samples {start_index_3d} to {end_index_3d} (of {total_heatmap_samples})")
+                    
+                    z_3d = heatmap_data[start_index_3d:end_index_3d]
+                    y_3d = y_labels[start_index_3d:end_index_3d]
+                else:
+                    z_3d = heatmap_data
+                    y_3d = y_labels
+                    st.info(f"Showing all {total_heatmap_samples} samples. (Slider appears if > {MAX_3D_SAMPLES})")
+
+                fig_3d = go.Figure(data=[go.Surface(
+                    z=z_3d,
+                    x=freqs_hm,
+                    y=y_3d,
+                    colorscale=custom_blue_scale,
+                    contours_z=dict(
+                        show=True,
+                        usecolormap=True,
+                        project_z=True,
+                        highlightcolor="white",
+                        highlightwidth=2
+                    )
+                )])
+                
+                fig_3d.update_layout(
+                    title=f'3D FFT Evolution - Axis: {selected_axis_hm}, Type: {selected_type_hm}',
+                    scene = dict(
+                        xaxis_title='Frequency (Hz)',
+                        yaxis_title='Time',
+                        zaxis_title='Amplitude',
+                        camera=dict(eye=dict(x=1.5, y=1.5, z=1.2))
+                    ),
+                    height=700,
+                    margin=dict(l=0, r=0, t=50, b=0)
                 )
-                end_index_3d = start_index_3d + MAX_3D_SAMPLES
-                
-                st.info(f"Displaying samples {start_index_3d} to {end_index_3d} (of {total_heatmap_samples})")
-                
-                z_3d = heatmap_data[start_index_3d:end_index_3d]
-                y_3d = y_labels[start_index_3d:end_index_3d]
-            else:
-                z_3d = heatmap_data
-                y_3d = y_labels
-                
-            fig_3d = go.Figure(data=[go.Surface(
-                z=z_3d,
-                x=freqs_hm,
-                y=y_3d,
-                colorscale=custom_blue_scale,
-                contours_z=dict(
-                    show=True,
-                    usecolormap=True,
-                    project_z=True,
-                    highlightcolor="white",
-                    highlightwidth=2
-                )
-            )])
+                st.plotly_chart(fig_3d, width="stretch", key="3d_fft_tab2")
             
-            fig_3d.update_layout(
-                title=f'3D FFT Evolution - Axis: {selected_axis_hm}, Type: {selected_type_hm}',
-                scene = dict(
-                    xaxis_title='Frequency (Hz)',
-                    yaxis_title='Time',
-                    zaxis_title='Amplitude',
-                    camera=dict(eye=dict(x=1.5, y=1.5, z=1.2))
-                ),
-                height=700,
-                margin=dict(l=0, r=0, t=50, b=0)
-            )
-            st.plotly_chart(fig_3d, width="stretch", key="3d_fft_tab2")
+            # Fault Guide
+            render_fault_guide()
 
     with fft_tab3:
         st.subheader("Advanced FFT Analysis")
