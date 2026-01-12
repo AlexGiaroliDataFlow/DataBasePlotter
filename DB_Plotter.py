@@ -1138,6 +1138,19 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
     # Store for use throughout the function
     fft_num_points = default_num_points
     
+    # User-adjustable number of frequencies to plot (shared across all FFT subtabs)
+    # Default is fft_num_points (from first row), max is len(fft_cols)
+    max_freq_available = len(fft_cols)
+    user_freq_to_plot = st.number_input(
+        "Frequencies to Plot (Hz)",
+        min_value=1,
+        max_value=max_freq_available,
+        value=min(fft_num_points, max_freq_available),
+        step=50,
+        key="fft_freq_to_plot",
+        help=f"Number of frequencies to display. Default from database: {fft_num_points} Hz. Max available: {max_freq_available} Hz. NaN values are treated as 0."
+    )
+    
     # Create subtabs
     fft_tab1, fft_tab2, fft_tab3 = st.tabs(["FFT", "FFT in Time", "Advanced Analysis"])
     
@@ -1187,16 +1200,18 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             # --- Primary Data ---
             row = df.iloc[primary_idx]
             num_points = row.get('number_of_points', fft_num_points)
-            # Use fft_num_points (from first row) for X-axis, limit values to that range
-            fft_values = [row[col] for col in fft_cols[:fft_num_points] if pd.notna(row[col])]
-            frequencies = np.arange(fft_num_points)
+            # Use user_freq_to_plot (user-adjustable) for X-axis, handle NaN as 0
+            freq_count = min(user_freq_to_plot, len(fft_cols))
+            fft_values = [row[col] if pd.notna(row[col]) else 0 for col in fft_cols[:freq_count]]
+            frequencies = np.arange(freq_count)
             
             # --- Comparison Data ---
             comp_row = None
             comp_fft_values = []
             if comparison_idx is not None and comparison_idx >= 0:
                 comp_row = df.iloc[comparison_idx]
-                comp_fft_values = [comp_row[col] for col in fft_cols if pd.notna(comp_row[col])]
+                # Handle NaN as 0 for comparison as well
+                comp_fft_values = [comp_row[col] if pd.notna(comp_row[col]) else 0 for col in fft_cols[:freq_count]]
 
                 # Align lengths if needed (though freq axis is index based 1Hz)
                 if len(comp_fft_values) > len(frequencies):
@@ -1572,8 +1587,8 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             y_labels = []
             
             # Determine Frequency Axis for Heatmap
-            # Use fft_num_points (determined from first row of fft_data table)
-            max_freq_points = min(fft_num_points, len(fft_cols))
+            # Use user_freq_to_plot (user-adjustable, shared across tabs)
+            max_freq_points = min(user_freq_to_plot, len(fft_cols))
             
             freqs_hm = np.arange(max_freq_points)
             cols_hm = fft_cols[:max_freq_points]
@@ -1698,18 +1713,18 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             timestamps = []
             spectra = []
             
-            # Use fft_num_points (determined from first row of fft_data table) for frequency axis
-            freqs_adv = np.arange(min(fft_num_points, len(fft_cols)))
+            # Use user_freq_to_plot (user-adjustable, shared across tabs) for frequency axis
+            freqs_adv = np.arange(min(user_freq_to_plot, len(fft_cols)))
             hz_per_bin = 1.0
             
-            # Calculate default values for energy bands based on number_of_points
+            # Calculate default values for energy bands based on user_freq_to_plot
             # For 500 points: Low = 100Hz, Medium = 250Hz
             # For 1000 points: Low = 200Hz, Medium = 500Hz
-            default_low_band = int(fft_num_points * 0.2)   # 20% of max frequency
-            default_med_band = int(fft_num_points * 0.5)   # 50% of max frequency
+            default_low_band = int(user_freq_to_plot * 0.2)   # 20% of max frequency
+            default_med_band = int(user_freq_to_plot * 0.5)   # 50% of max frequency
             
-            # Limit columns to the frequency range determined by fft_num_points
-            cols_adv = fft_cols[:min(fft_num_points, len(fft_cols))]
+            # Limit columns to the frequency range determined by user_freq_to_plot
+            cols_adv = fft_cols[:min(user_freq_to_plot, len(fft_cols))]
             
             for idx, row in df_adv.iterrows():
                 vals = [row[col] if pd.notna(row[col]) else 0 for col in cols_adv]
