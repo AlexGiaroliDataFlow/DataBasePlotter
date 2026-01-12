@@ -416,7 +416,7 @@ def create_date_range_slider(df: pd.DataFrame, key_prefix: str):
     return df[mask].copy(), 'datetime'
 
 
-def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = True, show_mqtt_calc: bool = True, mqtt_interval: int = 1, mqtt_stats: 'MqttStats' = None):
+def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = True, show_mqtt_calc: bool = True, mqtt_interval: int = 1, mqtt_stats: 'MqttStats' = None, df_comparison: pd.DataFrame = None, primary_label: str = "", comparison_label: str = ""):
     """Create interactive time series plots for sensor data."""
     if df_filtered is None or df_filtered.empty:
         st.warning("No sensor data available.")
@@ -442,38 +442,98 @@ def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool 
         st.warning("No valid data in selected range.")
         return df_filtered, [], x_axis
 
+    # Prepare comparison data if provided - ALIGN TIMESTAMPS
+    df_comp_aligned = None
+    if df_comparison is not None and not df_comparison.empty:
+        df_comp_aligned = df_comparison.copy()
+        
+        # Align timestamps: shift comparison data to start at primary data's start time
+        if x_axis == 'datetime' and 'datetime' in df_comp_aligned.columns:
+            primary_start = df_filtered[x_axis].min()
+            comp_start = df_comp_aligned['datetime'].min()
+            
+            # Calculate time offset and shift comparison timestamps
+            time_offset = primary_start - comp_start
+            df_comp_aligned['datetime'] = df_comp_aligned['datetime'] + time_offset
+            
+            # Get primary time range for filtering
+            primary_end = df_filtered[x_axis].max()
+            
+            # Filter to only include data within primary's range
+            mask = (df_comp_aligned['datetime'] >= primary_start) & (df_comp_aligned['datetime'] <= primary_end)
+            df_comp_aligned = df_comp_aligned[mask].copy()
+
     # Create individual plots for each sensor
     for idx, col in enumerate(valid_cols):
         try:
             line_color = SENSOR_COLORS[idx % len(SENSOR_COLORS)]
+            # Use a darker shade for comparison (more distinct)
+            comp_color = adjust_color_brightness(line_color, 0.7)
             
             # Create separate figure
             fig = go.Figure()
             
-            # Trace 1: Raw Data
+            # Primary DB name suffix
+            primary_suffix = f" [{primary_label}]" if primary_label else ""
+            comp_suffix = f" [{comparison_label}]" if comparison_label else " [Comp]"
+            
+            # Trace 1: Raw Data (Primary)
             fig.add_trace(go.Scatter(
                 x=df_filtered[x_axis],
                 y=df_filtered[col],
                 mode='lines',
-                name=col,
+                name=f'{col}{primary_suffix}',
                 line=dict(color=line_color, width=1),
                 opacity=0.7,
-                hovertemplate=f'{col}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                hovertemplate=f'{col}{primary_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
             ))
             
-            # Calculate Moving Average
+            # Calculate Moving Average (Primary)
             window_size = max(10, len(df_filtered) // 50)
             col_avg = df_filtered[col].rolling(window=window_size, center=True).mean()
             
-            # Trace 2: Average
+            # Trace 2: Average (Primary)
             fig.add_trace(go.Scatter(
                 x=df_filtered[x_axis],
                 y=col_avg,
                 mode='lines',
-                name=f'{col} Avg',
+                name=f'{col} Avg{primary_suffix}',
                 line=dict(color=line_color, width=2.5),
-                hovertemplate=f'{col} Avg: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                hovertemplate=f'{col} Avg{primary_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
             ))
+            
+            # Comparison DB traces (aligned timestamps, solid lines)
+            if df_comp_aligned is not None and not df_comp_aligned.empty and col in df_comp_aligned.columns:
+                # Convert comparison column to numeric if needed
+                comp_col_data = df_comp_aligned[col].copy()
+                if comp_col_data.dtype == 'object':
+                    comp_col_data = pd.to_numeric(comp_col_data, errors='coerce')
+                
+                if not comp_col_data.isna().all():
+                    # Trace 3: Raw Data (Comparison) - solid line, no transparency
+                    fig.add_trace(go.Scatter(
+                        x=df_comp_aligned[x_axis],
+                        y=comp_col_data,
+                        mode='lines',
+                        name=f'{col}{comp_suffix}',
+                        line=dict(color=comp_color, width=1),
+                        opacity=0.7,
+                        hovertemplate=f'{col}{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                    ))
+                    
+                    # Calculate Moving Average (Comparison)
+                    window_size_c = max(10, len(df_comp_aligned) // 50)
+                    col_avg_c = comp_col_data.rolling(window=window_size_c, center=True).mean()
+                    
+                    # Trace 4: Average (Comparison) - solid line
+                    fig.add_trace(go.Scatter(
+                        x=df_comp_aligned[x_axis],
+                        y=col_avg_c,
+                        mode='lines',
+                        name=f'{col} Avg{comp_suffix}',
+                        line=dict(color=comp_color, width=2.5),
+                        hovertemplate=f'{col} Avg{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                    ))
             
             fig.update_layout(
                 title=col.replace('_', ' ').title(),
@@ -564,7 +624,7 @@ def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool 
 
 
 
-def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: bool = True, mqtt_interval: int = 1, mqtt_stats: 'MqttStats' = None):
+def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: bool = True, mqtt_interval: int = 1, mqtt_stats: 'MqttStats' = None, df_comparison: pd.DataFrame = None, primary_label: str = "", comparison_label: str = ""):
     """Create interactive time series plots for power analyzer data."""
     if df.empty:
         st.warning("No power analyzer data available.")
@@ -591,6 +651,27 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
     
     # Date range slider
     df_filtered, x_axis = create_date_range_slider(df_abs, "power")
+    
+    # Prepare comparison data with time alignment
+    df_comp_aligned = None
+    if df_comparison is not None and not df_comparison.empty:
+        df_comp_aligned = df_comparison.copy()
+        # Apply absolute value to comparison data too
+        for col in abs_cols:
+            if col in df_comp_aligned.columns:
+                df_comp_aligned[col] = df_comp_aligned[col].abs()
+        
+        # Align timestamps: shift comparison data to start at primary data's start time
+        if x_axis == 'datetime' and 'datetime' in df_comp_aligned.columns:
+            primary_start = df_filtered[x_axis].min()
+            comp_start = df_comp_aligned['datetime'].min()
+            time_offset = primary_start - comp_start
+            df_comp_aligned['datetime'] = df_comp_aligned['datetime'] + time_offset
+            
+            # Filter to primary range
+            primary_end = df_filtered[x_axis].max()
+            mask = (df_comp_aligned['datetime'] >= primary_start) & (df_comp_aligned['datetime'] <= primary_end)
+            df_comp_aligned = df_comp_aligned[mask].copy()
     
     # Group related metrics
     current_cols = [c for c in power_cols if c.startswith('A') and not c.startswith('Asys')]
@@ -674,34 +755,71 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
                     y_label = col
                 
             line_color = SENSOR_COLORS[idx % len(SENSOR_COLORS)]
+            comp_color = adjust_color_brightness(line_color, 0.7)  # Darker for comparison
+            
+            # Label suffixes
+            primary_suffix = f" [{primary_label}]" if primary_label else ""
+            comp_suffix = f" [{comparison_label}]" if comparison_label else " [Comp]"
             
             # New Figure
             fig = go.Figure()
 
-            # Trace 1: Raw
+            # Trace 1: Raw (Primary)
             fig.add_trace(go.Scatter(
                 x=df_filtered[x_axis],
                 y=df_filtered[col],
                 mode='lines',
-                name=display_name,
+                name=f'{display_name}{primary_suffix}',
                 line=dict(color=line_color, width=1),
                 opacity=0.7,
-                hovertemplate=f'{display_name}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                hovertemplate=f'{display_name}{primary_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
             ))
             
-            # Calculate Moving Average
+            # Calculate Moving Average (Primary)
             window_size = max(10, len(df_filtered) // 50)
             col_avg = df_filtered[col].rolling(window=window_size, center=True).mean()
             
-            # Trace 2: Average
+            # Trace 2: Average (Primary)
             fig.add_trace(go.Scatter(
                 x=df_filtered[x_axis],
                 y=col_avg,
                 mode='lines',
-                name=f'{display_name} Avg',
+                name=f'{display_name} Avg{primary_suffix}',
                 line=dict(color=line_color, width=2.5),
-                hovertemplate=f'{display_name} Avg: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                hovertemplate=f'{display_name} Avg{primary_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
             ))
+            
+            # Comparison DB traces (if available)
+            if df_comp_aligned is not None and not df_comp_aligned.empty and col in df_comp_aligned.columns:
+                comp_col_data = df_comp_aligned[col].copy()
+                if comp_col_data.dtype == 'object':
+                    comp_col_data = pd.to_numeric(comp_col_data, errors='coerce')
+                
+                if not comp_col_data.isna().all():
+                    # Trace 3: Raw (Comparison)
+                    fig.add_trace(go.Scatter(
+                        x=df_comp_aligned[x_axis],
+                        y=comp_col_data,
+                        mode='lines',
+                        name=f'{display_name}{comp_suffix}',
+                        line=dict(color=comp_color, width=1),
+                        opacity=0.7,
+                        hovertemplate=f'{display_name}{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                    ))
+                    
+                    # Calculate Moving Average (Comparison)
+                    window_size_c = max(10, len(df_comp_aligned) // 50)
+                    col_avg_c = comp_col_data.rolling(window=window_size_c, center=True).mean()
+                    
+                    # Trace 4: Average (Comparison)
+                    fig.add_trace(go.Scatter(
+                        x=df_comp_aligned[x_axis],
+                        y=col_avg_c,
+                        mode='lines',
+                        name=f'{display_name} Avg{comp_suffix}',
+                        line=dict(color=comp_color, width=2.5),
+                        hovertemplate=f'{display_name} Avg{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                    ))
             
             fig.update_layout(
                  title=plot_title,
@@ -903,7 +1021,7 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
             preview_json_sequence = "\n".join([json.dumps(p, separators=(',', ':'), allow_nan=True) for p in all_payloads_power[:10]])
             st.code(preview_json_sequence, language='json')
 
-def plot_tilt_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = True, show_mqtt_calc: bool = True, mqtt_interval: int = 1, mqtt_stats: 'MqttStats' = None):
+def plot_tilt_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = True, show_mqtt_calc: bool = True, mqtt_interval: int = 1, mqtt_stats: 'MqttStats' = None, df_comparison: pd.DataFrame = None, primary_label: str = "", comparison_label: str = ""):
     """Create interactive time series plot for tilt data."""
     if df_filtered is None or df_filtered.empty:
         st.warning("No tilt data available.")
@@ -914,6 +1032,28 @@ def plot_tilt_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = 
 
     # Use a unique color from the extended palette (turquoise - not used by typical sensors)
     tilt_color = SENSOR_COLORS[11]  # turquoise
+    comp_tilt_color = adjust_color_brightness(tilt_color, 0.7)  # Darker for comparison
+    
+    # Prepare comparison data with time alignment
+    df_comp_aligned = None
+    if df_comparison is not None and not df_comparison.empty and 'tilt_angle' in df_comparison.columns:
+        df_comp_aligned = df_comparison.copy()
+        
+        # Align timestamps
+        if x_axis == 'datetime' and 'datetime' in df_comp_aligned.columns:
+            primary_start = df_filtered[x_axis].min()
+            comp_start = df_comp_aligned['datetime'].min()
+            time_offset = primary_start - comp_start
+            df_comp_aligned['datetime'] = df_comp_aligned['datetime'] + time_offset
+            
+            # Filter to primary range
+            primary_end = df_filtered[x_axis].max()
+            mask = (df_comp_aligned['datetime'] >= primary_start) & (df_comp_aligned['datetime'] <= primary_end)
+            df_comp_aligned = df_comp_aligned[mask].copy()
+    
+    # Label suffixes
+    primary_suffix = f" [{primary_label}]" if primary_label else ""
+    comp_suffix = f" [{comparison_label}]" if comparison_label else " [Comp]"
     
     try:
         # Calculate moving average
@@ -922,26 +1062,53 @@ def plot_tilt_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = 
         
         fig = go.Figure()
         
-        # Trace 1: Raw Data
+        # Trace 1: Raw Data (Primary)
         fig.add_trace(go.Scatter(
             x=df_filtered[x_axis],
             y=df_filtered['tilt_angle'],
             mode='lines',
-            name='Tilt Angle',
+            name=f'Tilt Angle{primary_suffix}',
             line=dict(color=tilt_color, width=1),
             opacity=0.5,
-            hovertemplate='Tilt Angle: %{y:.2f} deg<br>Time: %{x}<extra></extra>'
+            hovertemplate=f'Tilt Angle{primary_suffix}: %{{y:.2f}} deg<br>Time: %{{x}}<extra></extra>'
         ))
         
-        # Trace 2: Average
+        # Trace 2: Average (Primary)
         fig.add_trace(go.Scatter(
             x=df_filtered[x_axis],
             y=df_filtered['tilt_angle_avg'],
             mode='lines',
-            name='Tilt Angle Avg',
+            name=f'Tilt Angle Avg{primary_suffix}',
             line=dict(color=tilt_color, width=3),
-            hovertemplate='Tilt Angle Avg: %{y:.2f} deg<br>Time: %{x}<extra></extra>'
+            hovertemplate=f'Tilt Angle Avg{primary_suffix}: %{{y:.2f}} deg<br>Time: %{{x}}<extra></extra>'
         ))
+        
+        # Comparison traces
+        if df_comp_aligned is not None and not df_comp_aligned.empty:
+            # Calculate moving average for comparison
+            window_size_c = max(10, len(df_comp_aligned) // 50)
+            df_comp_aligned['tilt_angle_avg'] = df_comp_aligned['tilt_angle'].rolling(window=window_size_c, center=True).mean()
+            
+            # Trace 3: Raw Data (Comparison)
+            fig.add_trace(go.Scatter(
+                x=df_comp_aligned[x_axis],
+                y=df_comp_aligned['tilt_angle'],
+                mode='lines',
+                name=f'Tilt Angle{comp_suffix}',
+                line=dict(color=comp_tilt_color, width=1),
+                opacity=0.5,
+                hovertemplate=f'Tilt Angle{comp_suffix}: %{{y:.2f}} deg<br>Time: %{{x}}<extra></extra>'
+            ))
+            
+            # Trace 4: Average (Comparison)
+            fig.add_trace(go.Scatter(
+                x=df_comp_aligned[x_axis],
+                y=df_comp_aligned['tilt_angle_avg'],
+                mode='lines',
+                name=f'Tilt Angle Avg{comp_suffix}',
+                line=dict(color=comp_tilt_color, width=3),
+                hovertemplate=f'Tilt Angle Avg{comp_suffix}: %{{y:.2f}} deg<br>Time: %{{x}}<extra></extra>'
+            ))
 
         fig.update_layout(
             title="Tilt Angle (Calculated)",
@@ -1112,7 +1279,7 @@ def render_fault_guide():
             </div>
             """, unsafe_allow_html=True)
 
-def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: bool = True, mqtt_stats: 'MqttStats' = None):
+def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: bool = True, mqtt_stats: 'MqttStats' = None, df_comparison: pd.DataFrame = None, primary_db_name: str = "", comparison_db_name: str = ""):
     """Create interactive bar charts for FFT data."""
     if df.empty:
         st.warning("No FFT data available.")
@@ -1155,9 +1322,11 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
     fft_tab1, fft_tab2, fft_tab3 = st.tabs(["FFT", "FFT in Time", "Advanced Analysis"])
     
     with fft_tab1:
-        # Build dropdown options with metadata
-        # Format: axis, amplitude (G), type, Number of points, interval of analysis
+        # Build dropdown options with metadata from PRIMARY DB
+        # Format: [DB_NAME] axis, amplitude (G), type, Number of points, interval of analysis
         dropdown_options = []
+        primary_prefix = f"[{primary_db_name}] " if primary_db_name else ""
+        
         for idx, row in df.iterrows():
             axis = row.get('axis', 'N/A')  # X, Y, or Z
             max_amplitude = row.get('max_amplitude_g', 'N/A')  # Amplitude in G
@@ -1168,14 +1337,34 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             # Format amplitude
             amplitude_str = f"{max_amplitude} G"
             
-            label = f"{axis} | {amplitude_str} | {fft_type} | {num_points} Hz | {interval}"
-            dropdown_options.append((idx, label))
+            label = f"{primary_prefix}{axis} | {amplitude_str} | {fft_type} | {num_points} Hz | {interval}"
+            dropdown_options.append(('primary', idx, label))
         
-        # Determine default indices for X Acc and X Vel
+        # Build dropdown options from COMPARISON DB if available
+        comp_prefix = f"[{comparison_db_name}] " if comparison_db_name else "[Comp] "
+        comparison_dropdown_options = []
+        if df_comparison is not None and not df_comparison.empty:
+            # Get comparison FFT columns
+            comp_fft_cols = [col for col in df_comparison.columns if col.startswith('p_')]
+            comp_fft_cols = sorted(comp_fft_cols, key=lambda x: int(x.split('_')[1]))
+            
+            if comp_fft_cols:
+                for idx, row in df_comparison.iterrows():
+                    axis = row.get('axis', 'N/A')
+                    max_amplitude = row.get('max_amplitude_g', 'N/A')
+                    fft_type = row.get('type', 'N/A')
+                    num_points = int(row.get('number_of_points', len(comp_fft_cols)))
+                    interval = row.get('human_interval_of_analysis', 'N/A')
+                    
+                    amplitude_str = f"{max_amplitude} G"
+                    label = f"{comp_prefix}{axis} | {amplitude_str} | {fft_type} | {num_points} Hz | {interval}"
+                    comparison_dropdown_options.append(('comparison', idx, label))
+        
+        # Determine default indices for X Acc and X Vel (from primary only)
         idx_x_acc = None
         idx_x_vel = None
         
-        for i, (orig_idx, _) in enumerate(dropdown_options):
+        for i, (source, orig_idx, _) in enumerate(dropdown_options):
             r = df.iloc[orig_idx]
             r_axis = r.get('axis', 'N/A')
             r_type = r.get('type', 'N/A')
@@ -1195,10 +1384,18 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
         # Percentile selector - Uses value from sidebar slider (defined in main breakdown)
         percentile_value = st.session_state.get("percentile_slider", 90)
         
-        # Helper function to plot FFT with optional comparison
-        def plot_fft_comparison(primary_idx: int, comparison_idx: int = None, update_global_stats: bool = False, p_col=PASTEL_COLORS[3], c_col='#E67E22'):
+        # Helper function to plot FFT with optional comparison (supports cross-database)
+        def plot_fft_comparison(primary_source: str, primary_idx: int, comp_source: str = None, comparison_idx: int = None, update_global_stats: bool = False, p_col=PASTEL_COLORS[3], c_col='#E67E22'):
             # --- Primary Data ---
-            row = df.iloc[primary_idx]
+            if primary_source == 'primary':
+                row = df.iloc[primary_idx]
+            else:
+                row = df_comparison.iloc[primary_idx] if df_comparison is not None else None
+            
+            if row is None:
+                st.error("Primary data not available")
+                return
+                
             num_points = row.get('number_of_points', fft_num_points)
             # Use user_freq_to_plot (user-adjustable) for X-axis, handle NaN as 0
             freq_count = min(user_freq_to_plot, len(fft_cols))
@@ -1209,15 +1406,21 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             comp_row = None
             comp_fft_values = []
             if comparison_idx is not None and comparison_idx >= 0:
-                comp_row = df.iloc[comparison_idx]
-                # Handle NaN as 0 for comparison as well
-                comp_fft_values = [comp_row[col] if pd.notna(comp_row[col]) else 0 for col in fft_cols[:freq_count]]
+                # Get comparison row from correct database
+                if comp_source == 'primary':
+                    comp_row = df.iloc[comparison_idx]
+                elif comp_source == 'comparison' and df_comparison is not None:
+                    comp_row = df_comparison.iloc[comparison_idx]
+                
+                if comp_row is not None:
+                    # Handle NaN as 0 for comparison as well
+                    comp_fft_values = [comp_row[col] if pd.notna(comp_row[col]) else 0 for col in fft_cols[:freq_count]]
 
-                # Align lengths if needed (though freq axis is index based 1Hz)
-                if len(comp_fft_values) > len(frequencies):
-                    comp_fft_values = comp_fft_values[:len(frequencies)]
-                elif len(comp_fft_values) < len(frequencies):
-                    comp_fft_values += [0] * (len(frequencies) - len(comp_fft_values))
+                    # Align lengths if needed (though freq axis is index based 1Hz)
+                    if len(comp_fft_values) > len(frequencies):
+                        comp_fft_values = comp_fft_values[:len(frequencies)]
+                    elif len(comp_fft_values) < len(frequencies):
+                        comp_fft_values += [0] * (len(frequencies) - len(comp_fft_values))
 
             # Calculate percentile thresholds
             primary_threshold = np.percentile(fft_values, percentile_value)
@@ -1502,39 +1705,47 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
         # --- UI Selection ---
         st.subheader("FFT Analysis")
         
-        # Primary Selector
+        # Primary Selector (only from primary DB)
         col_p1, col_p2 = st.columns([0.85, 0.15])
         with col_p1:
             selected_idx_1 = st.selectbox(
                 "Primary FFT Sample",
                 options=range(len(dropdown_options)),
-                format_func=lambda x: dropdown_options[x][1],
+                format_func=lambda x: dropdown_options[x][2],  # Use label from 3-tuple
                 key="fft_selector_1",
                 index=idx_x_acc
             )
         with col_p2:
             p_color_choice = st.color_picker("Primary", value=PASTEL_COLORS[3], key="p_color_picker", label_visibility="hidden")
         
-        # Comparison Selector
-        # Add a "None" option
-        comp_options = [(-1, "None")] + dropdown_options
+        # Get primary source and index
+        primary_source, primary_row_idx, _ = dropdown_options[selected_idx_1]
+        
+        # Comparison Selector - include both DBs
+        # Format: (source, idx, label) where source is 'primary' or 'comparison'
+        none_option = [('none', -1, "None")]
+        all_comp_options = none_option + dropdown_options + comparison_dropdown_options
         
         col_c1, col_c2 = st.columns([0.85, 0.15])
         with col_c1:
-            selected_comp_tuple = st.selectbox(
+            selected_comp_idx = st.selectbox(
                 "Comparison FFT Sample",
-                options=comp_options,
-                format_func=lambda x: x[1],
+                options=range(len(all_comp_options)),
+                format_func=lambda x: all_comp_options[x][2],  # Use label from 3-tuple
                 key="fft_selector_2",
-                index=0 # Default to None
+                index=0  # Default to None
             )
         with col_c2:
             c_color_choice = st.color_picker("Compare", value='#E67E22', key="c_color_picker", label_visibility="hidden")
-            
-        selected_idx_2 = selected_comp_tuple[0]
+        
+        # Get comparison source and index
+        comp_source, comp_row_idx, _ = all_comp_options[selected_comp_idx]
+        if comp_source == 'none':
+            comp_row_idx = None
+            comp_source = None
 
         # Plot
-        plot_fft_comparison(selected_idx_1, selected_idx_2, update_global_stats=True, p_col=p_color_choice, c_col=c_color_choice)
+        plot_fft_comparison(primary_source, primary_row_idx, comp_source, comp_row_idx, update_global_stats=True, p_col=p_color_choice, c_col=c_color_choice)
     # Common filters for subtabs 2 and 3
     # Get available axes and types
     available_axes = df['axis'].dropna().unique().tolist() if 'axis' in df.columns else ['X', 'Y', 'Z']
@@ -2136,9 +2347,6 @@ def main():
     mqtt_stats = MqttStats() if "show_mqtt_calc" in st.session_state and st.session_state.show_mqtt_calc else None
     
     # File uploader for custom database
-
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Upload a Database")
     uploaded_file = st.sidebar.file_uploader(
         "Upload .db file",
         type=['db'],
@@ -2151,6 +2359,69 @@ def main():
         with open(temp_path, 'wb') as f:
             f.write(uploaded_file.getvalue())
         db_path = temp_path
+    
+    # --- Comparison Database Section ---
+    # Initialize enable_comparison from session state (toggle defined later in Analysis Settings)
+    enable_comparison = st.session_state.get("enable_db_comparison", False)
+    
+    comp_db_path = None
+    comp_conn = None
+    primary_db_name = ""
+    comp_db_name = ""
+    
+    # Extract primary DB name
+    if db_path:
+        if uploaded_file is not None:
+            primary_db_name = Path(uploaded_file.name).stem
+        elif selected_db:
+            primary_db_name = Path(selected_db).stem
+    
+    if enable_comparison:
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Comparison Database")
+        # Comparison database selection from folder
+        comp_available_dbs = [db for db in available_dbs if db != selected_db] if available_dbs else []
+        
+        comp_selected_db = None
+        if comp_available_dbs:
+            comp_selected_db = st.sidebar.selectbox(
+                "Select comparison database:",
+                options=["(None)"] + comp_available_dbs,
+                help="Select a database from the Database folder to compare",
+                key="comp_db_selector"
+            )
+            if comp_selected_db and comp_selected_db != "(None)":
+                comp_db_path = db_folder / comp_selected_db
+                comp_db_name = Path(comp_selected_db).stem
+        
+        # Comparison database upload
+        comp_uploaded_file = st.sidebar.file_uploader(
+            "Or upload comparison .db file",
+            type=['db'],
+            help="Upload a SQLite database file for comparison",
+            key="comp_file_uploader"
+        )
+        comp_upload_placeholder = st.sidebar.empty()
+        
+        if comp_uploaded_file is not None:
+            # Save uploaded comparison file temporarily
+            comp_temp_path = Path("temp_comparison.db")
+            with open(comp_temp_path, 'wb') as f:
+                f.write(comp_uploaded_file.getvalue())
+            comp_db_path = comp_temp_path
+            comp_db_name = Path(comp_uploaded_file.name).stem
+        
+        # Load comparison database
+        if comp_db_path and Path(comp_db_path).exists():
+            try:
+                comp_conn = load_database(str(comp_db_path))
+                if comp_uploaded_file is not None:
+                    comp_upload_placeholder.success(f"Comparison: {comp_uploaded_file.name}")
+                elif comp_selected_db and comp_selected_db != "(None)":
+                    st.sidebar.success(f"Comparison: {comp_selected_db}")
+            except Exception as e:
+                st.sidebar.error(f"Failed to load comparison DB: {e}")
+                comp_conn = None
     
     if db_path is None or not Path(db_path).exists():
         st.warning("Please select or upload a database to visualize.")
@@ -2193,6 +2464,15 @@ def main():
         # Load both first to determine common range
         df_sensors_raw = get_table_data(conn, 'sensor_data') if check_table_exists(conn, 'sensor_data') else pd.DataFrame()
         df_tilt_raw = get_table_data(conn, 'tilt_data') if check_table_exists(conn, 'tilt_data') else pd.DataFrame()
+        
+        # Load comparison data if enabled
+        df_sensors_comp = None
+        df_tilt_comp = None
+        if enable_comparison and comp_conn:
+            if check_table_exists(comp_conn, 'sensor_data'):
+                df_sensors_comp = get_table_data(comp_conn, 'sensor_data')
+            if check_table_exists(comp_conn, 'tilt_data'):
+                df_tilt_comp = get_table_data(comp_conn, 'tilt_data')
 
         if not df_sensors_raw.empty:
             # Use sensors as primary for range
@@ -2210,15 +2490,25 @@ def main():
             else:
                 df_tilt_filtered = df_tilt_raw.copy()
 
-            # Plot Sensors
-            res = plot_sensor_data(df_sensors_filtered, x_axis_res, show_quality, False, mqtt_interval, mqtt_stats)
+            # Plot Sensors with comparison overlay
+            res = plot_sensor_data(
+                df_sensors_filtered, x_axis_res, show_quality, False, mqtt_interval, mqtt_stats,
+                df_comparison=df_sensors_comp,
+                primary_label=primary_db_name if enable_comparison and comp_conn else "",
+                comparison_label=comp_db_name if enable_comparison and comp_conn else ""
+            )
             if res:
                 df_sensor_res, cols_sensor_res, x_axis_res = res
             
-            # Plot Tilt
+            # Plot Tilt with comparison overlay
             if not df_tilt_filtered.empty:
                 st.markdown("---") # Separator
-                res_t = plot_tilt_data(df_tilt_filtered, x_axis_res, show_quality, show_mqtt_calc, mqtt_interval, mqtt_stats)
+                res_t = plot_tilt_data(
+                    df_tilt_filtered, x_axis_res, show_quality, show_mqtt_calc, mqtt_interval, mqtt_stats,
+                    df_comparison=df_tilt_comp,
+                    primary_label=primary_db_name if enable_comparison and comp_conn else "",
+                    comparison_label=comp_db_name if enable_comparison and comp_conn else ""
+                )
                 if res_t:
                     df_tilt_res, cols_tilt_res = res_t
             
@@ -2237,14 +2527,38 @@ def main():
     with tab2:
         if check_table_exists(conn, 'power_analyzer_data'):
             df_power = get_table_data(conn, 'power_analyzer_data')
-            plot_power_analyzer_data(df_power, show_quality, show_mqtt_calc, mqtt_interval, mqtt_stats)
+            
+            # Load comparison power analyzer data if enabled
+            df_power_comp = None
+            if enable_comparison and comp_conn:
+                if check_table_exists(comp_conn, 'power_analyzer_data'):
+                    df_power_comp = get_table_data(comp_conn, 'power_analyzer_data')
+            
+            plot_power_analyzer_data(
+                df_power, show_quality, show_mqtt_calc, mqtt_interval, mqtt_stats,
+                df_comparison=df_power_comp,
+                primary_label=primary_db_name if enable_comparison and comp_conn else "",
+                comparison_label=comp_db_name if enable_comparison and comp_conn else ""
+            )
         else:
             st.warning("Power analyzer data table not found in database.")
     
     with tab3:
         if check_table_exists(conn, 'fft_data'):
             df_fft = get_table_data(conn, 'fft_data')
-            plot_fft_data(df_fft, show_quality, show_mqtt_calc, mqtt_stats)
+            
+            # Load comparison FFT data if enabled
+            df_fft_comp = None
+            if enable_comparison and comp_conn:
+                if check_table_exists(comp_conn, 'fft_data'):
+                    df_fft_comp = get_table_data(comp_conn, 'fft_data')
+            
+            plot_fft_data(
+                df_fft, show_quality, show_mqtt_calc, mqtt_stats,
+                df_comparison=df_fft_comp,
+                primary_db_name=primary_db_name if enable_comparison and comp_conn else "",
+                comparison_db_name=comp_db_name if enable_comparison and comp_conn else ""
+            )
         else:
             st.warning("FFT data table not found in database.")
     
@@ -2260,6 +2574,7 @@ def main():
     st.sidebar.subheader("Analysis Settings")
     show_quality = st.sidebar.toggle("Transmission Quality", value=show_quality, help="Highlight missing data and show success rate.", key="show_quality_toggle")
     show_mqtt_calc = st.sidebar.toggle("MQTT Packets", value=show_mqtt_calc, help="Calculate and show optimized MQTT JSON payload size.", key="show_mqtt_calc_toggle")
+    enable_comparison = st.sidebar.toggle("DB Comparison", value=enable_comparison, help="Enable comparison with a second database.", key="enable_db_comparison")
     
     if show_mqtt_calc:
         mqtt_interval = st.sidebar.slider(
@@ -2320,10 +2635,20 @@ def main():
     
 
     
-    # Clean up temporary file if it exists
+    # Clean up temporary files if they exist
     temp_path = Path("temp_uploaded.db")
     if temp_path.exists() and uploaded_file is None:
         temp_path.unlink()
+    
+    comp_temp_path = Path("temp_comparison.db")
+    if comp_temp_path.exists():
+        # Only clean up if comparison is disabled or no file was uploaded
+        comp_file_exists = 'comp_uploaded_file' in dir() and comp_uploaded_file is not None
+        if not enable_comparison or not comp_file_exists:
+            try:
+                comp_temp_path.unlink()
+            except:
+                pass  # File might be in use
 
 
 if __name__ == "__main__":
