@@ -1697,10 +1697,167 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     with st.expander("View JSON Payload", expanded=False):
                         st.code(json_str, language='json', line_numbers=False)
 
+                # --- Bit Mask Analysis ---
+                st.markdown("---")
+                st.markdown("#### Bit Mask Analysis")
+                
+                # Create binary mask: 1 if peak exceeds threshold, 0 otherwise
+                bit_mask = ''.join(['1' if val > primary_threshold else '0' for val in fft_values])
+                
+                # Convert binary to hex (groups of 4 bits)
+                # Pad the binary mask to be a multiple of 4
+                padded_length = ((len(bit_mask) + 3) // 4) * 4
+                padded_mask = bit_mask.ljust(padded_length, '0')
+                
+                # Convert to hex, 4 bits at a time
+                hex_chars = []
+                for i in range(0, len(padded_mask), 4):
+                    nibble = padded_mask[i:i+4]
+                    hex_char = format(int(nibble, 2), 'X')
+                    hex_chars.append(hex_char)
+                hex_mask = ''.join(hex_chars)
+                
+                # Compact the hexmask: replace consecutive zeros (>2) with -N-
+                def compact_hex_mask(hex_str):
+                    result = []
+                    i = 0
+                    while i < len(hex_str):
+                        if hex_str[i] == '0':
+                            zero_count = 0
+                            j = i
+                            while j < len(hex_str) and hex_str[j] == '0':
+                                zero_count += 1
+                                j += 1
+                            if zero_count > 2:
+                                result.append(f"-{zero_count}-")
+                            else:
+                                result.append('0' * zero_count)
+                            i = j
+                        else:
+                            result.append(hex_str[i])
+                            i += 1
+                    return ''.join(result)
+                
+                compacted_mask = compact_hex_mask(hex_mask)
+                
+                # Calculate sizes
+                bit_mask_peaks_count = bit_mask.count('1')
+                original_json_size = payload_size
+                
+                # Build NEW optimized JSON with compacted mask + amplitudes
+                # Extract only the amplitudes of peaks that exceed threshold
+                peak_amplitudes = [float(round(val, 2)) for val in fft_values if val > primary_threshold]
+                
+                optimized_payload = {
+                    "type": payload.get("type", "N/A"),
+                    "points": payload.get("points", 0),
+                    "axis": payload.get("axis", "N/A"),
+                    "ts": payload.get("ts", 0),
+                    "avg": payload.get("avg", 0),
+                    "mask": compacted_mask,
+                    "amps": peak_amplitudes
+                }
+                optimized_json_str = json.dumps(optimized_payload, separators=(',', ':'))
+                optimized_json_size = len(optimized_json_str)
+                
+                # Color palette for hex values (16 colors for 0-F)
+                nibble_colors = [
+                    '#6C7A89',  # 0 - Gray
+                    '#E74C3C',  # 1 - Red
+                    '#E67E22',  # 2 - Orange
+                    '#F1C40F',  # 3 - Yellow
+                    '#2ECC71',  # 4 - Green
+                    '#1ABC9C',  # 5 - Teal
+                    '#3498DB',  # 6 - Blue
+                    '#9B59B6',  # 7 - Purple
+                    '#E91E63',  # 8 - Pink
+                    '#00BCD4',  # 9 - Cyan
+                    '#8BC34A',  # A - Light green
+                    '#FF5722',  # B - Deep orange
+                    '#673AB7',  # C - Deep purple
+                    '#795548',  # D - Brown
+                    '#607D8B',  # E - Blue gray
+                    '#FF9800',  # F - Amber
+                ]
+                
+                # Generate color-coded bit mask HTML (groups of 4 bits)
+                bit_mask_html_parts = []
+                for i in range(0, len(padded_mask), 4):
+                    nibble = padded_mask[i:i+4]
+                    hex_val = int(nibble, 2)
+                    color = nibble_colors[hex_val]
+                    bit_mask_html_parts.append(f'<span style="color:{color};font-family:monospace;">{nibble}</span>')
+                bit_mask_colored_html = ''.join(bit_mask_html_parts)
+                
+                # Generate color-coded hex mask HTML
+                hex_mask_html_parts = []
+                for hex_char in hex_mask:
+                    hex_val = int(hex_char, 16)
+                    color = nibble_colors[hex_val]
+                    hex_mask_html_parts.append(f'<span style="color:{color};font-family:monospace;">{hex_char}</span>')
+                hex_mask_colored_html = ''.join(hex_mask_html_parts)
+                
+                # Generate compacted mask HTML
+                import re
+                def format_compacted_mask(mask_str):
+                    parts = re.split(r'(-\d+-)', mask_str)
+                    html_parts = []
+                    for part in parts:
+                        if re.match(r'-\d+-', part):
+                            html_parts.append(f'<span style="color:#E74C3C;font-family:monospace;">{part}</span>')
+                        else:
+                            html_parts.append(f'<span style="font-family:monospace;">{part}</span>')
+                    return ''.join(html_parts)
+                
+                compacted_mask_html = format_compacted_mask(compacted_mask)
+                
+                # --- Side by side: Original JSON vs Optimized JSON ---
+                col_old, col_new = st.columns(2)
+                
+                with col_old:
+                    st.markdown("**Original JSON Payload**")
+                    st.code(json_str, language='json')
+                    st.caption(f"Size: **{original_json_size} bytes**")
+                
+                with col_new:
+                    st.markdown("**Optimized JSON (Mask + Amplitudes)**")
+                    st.code(optimized_json_str, language='json')
+                    st.caption(f"Size: **{optimized_json_size} bytes**")
+                
+                # --- Mask Details (expandable) ---
+                with st.expander("View Bit Mask Details", expanded=False):
+                    st.markdown("**Bit Mask (Binary)** - Colored by nibble value:")
+                    st.markdown(f'<div style="word-break:break-all;line-height:1.8;font-size:0.9rem;">{bit_mask_colored_html}</div>', unsafe_allow_html=True)
+                    st.markdown("")
+                    st.markdown("**HexMask** - Color-coded:")
+                    st.markdown(f'<div style="word-break:break-all;line-height:1.8;">{hex_mask_colored_html}</div>', unsafe_allow_html=True)
+                    st.markdown("")
+                    st.markdown("**Compacted Mask:**")
+                    st.markdown(f'<div style="word-break:break-all;line-height:1.6;">{compacted_mask_html}</div>', unsafe_allow_html=True)
+                
+                # --- Final Analysis ---
+                st.markdown("##### Compression Analysis")
+                
+                savings = original_json_size - optimized_json_size
+                savings_pct = (savings / original_json_size * 100) if original_json_size > 0 else 0
+                
+                col_a1, col_a2, col_a3, col_a4 = st.columns(4)
+                with col_a1:
+                    st.metric("Peaks Detected", bit_mask_peaks_count)
+                with col_a2:
+                    st.metric("Original JSON", f"{original_json_size} B")
+                with col_a3:
+                    st.metric("Optimized JSON", f"{optimized_json_size} B")
+                with col_a4:
+                    if savings > 0:
+                        st.metric("Savings", f"{savings_pct:.1f}%", delta=f"-{savings} bytes", delta_color="inverse")
+                    else:
+                        st.metric("Overhead", f"{abs(savings_pct):.1f}%", delta=f"+{abs(savings)} bytes", delta_color="normal")
+
                 if update_global_stats and mqtt_stats:
                      total_fft_samples = len(df)
-                     total_fft_bytes = payload_size * total_fft_samples
-                     mqtt_stats.add("FFT", total_fft_bytes, total_fft_samples, f"{total_fft_samples} Samples | P{percentile_value} | {len(peaks_list)} Peaks")
+                     total_fft_bytes = optimized_json_size * total_fft_samples
+                     mqtt_stats.add("FFT", total_fft_bytes, total_fft_samples, f"{total_fft_samples} Samples | P{percentile_value} | {bit_mask_peaks_count} Peaks | Optimized")
 
         # --- UI Selection ---
         st.subheader("FFT Analysis")
