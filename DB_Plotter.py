@@ -1666,7 +1666,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             if show_mqtt_calc:
                 # MQTT Calc logic (Primary Only)
                 st.markdown("---")
-                st.subheader("MQTT Analysis (Primary)")
+                st.subheader("MQTT Analysis")
                 
                 # Construct optimized payload
                 ts_val = 0
@@ -1676,7 +1676,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 peaks_list = []
                 for i, val in enumerate(fft_values):
                     if val > primary_threshold:
-                        peaks_list.append([int(frequencies[i]), float(round(val, 2))])
+                        peaks_list.append([int(frequencies[i]), float(round(val, 3))])
                 
                 payload = {
                     "type": "acc" if row.get('type') == 'acceleration' else ("vel" if row.get('type') == 'velocity' else row.get('type', 'N/A')),
@@ -1689,17 +1689,6 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 
                 json_str = json.dumps(payload, separators=(',', ':'))
                 payload_size = len(json_str)
-
-                c1, c2 = st.columns([1, 3])
-                with c1:
-                    st.metric("Est. Payload Size", f"{payload_size} bytes")
-                with c2:
-                    with st.expander("View JSON Payload", expanded=False):
-                        st.code(json_str, language='json', line_numbers=False)
-
-                # --- Bit Mask Analysis ---
-                st.markdown("---")
-                st.markdown("#### Bit Mask Analysis")
                 
                 # Create binary mask: 1 if peak exceeds threshold, 0 otherwise
                 bit_mask = ''.join(['1' if val > primary_threshold else '0' for val in fft_values])
@@ -1746,7 +1735,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 
                 # Build NEW optimized JSON with compacted mask + amplitudes
                 # Extract only the amplitudes of peaks that exceed threshold
-                peak_amplitudes = [float(round(val, 2)) for val in fft_values if val > primary_threshold]
+                peak_amplitudes = [float(round(val, 3)) for val in fft_values if val > primary_threshold]
                 
                 optimized_payload = {
                     "type": payload.get("type", "N/A"),
@@ -1759,57 +1748,6 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 }
                 optimized_json_str = json.dumps(optimized_payload, separators=(',', ':'))
                 optimized_json_size = len(optimized_json_str)
-                
-                # Color palette for hex values (16 colors for 0-F)
-                nibble_colors = [
-                    '#6C7A89',  # 0 - Gray
-                    '#E74C3C',  # 1 - Red
-                    '#E67E22',  # 2 - Orange
-                    '#F1C40F',  # 3 - Yellow
-                    '#2ECC71',  # 4 - Green
-                    '#1ABC9C',  # 5 - Teal
-                    '#3498DB',  # 6 - Blue
-                    '#9B59B6',  # 7 - Purple
-                    '#E91E63',  # 8 - Pink
-                    '#00BCD4',  # 9 - Cyan
-                    '#8BC34A',  # A - Light green
-                    '#FF5722',  # B - Deep orange
-                    '#673AB7',  # C - Deep purple
-                    '#795548',  # D - Brown
-                    '#607D8B',  # E - Blue gray
-                    '#FF9800',  # F - Amber
-                ]
-                
-                # Generate color-coded bit mask HTML (groups of 4 bits)
-                bit_mask_html_parts = []
-                for i in range(0, len(padded_mask), 4):
-                    nibble = padded_mask[i:i+4]
-                    hex_val = int(nibble, 2)
-                    color = nibble_colors[hex_val]
-                    bit_mask_html_parts.append(f'<span style="color:{color};font-family:monospace;">{nibble}</span>')
-                bit_mask_colored_html = ''.join(bit_mask_html_parts)
-                
-                # Generate color-coded hex mask HTML
-                hex_mask_html_parts = []
-                for hex_char in hex_mask:
-                    hex_val = int(hex_char, 16)
-                    color = nibble_colors[hex_val]
-                    hex_mask_html_parts.append(f'<span style="color:{color};font-family:monospace;">{hex_char}</span>')
-                hex_mask_colored_html = ''.join(hex_mask_html_parts)
-                
-                # Generate compacted mask HTML
-                import re
-                def format_compacted_mask(mask_str):
-                    parts = re.split(r'(-\d+-)', mask_str)
-                    html_parts = []
-                    for part in parts:
-                        if re.match(r'-\d+-', part):
-                            html_parts.append(f'<span style="color:#E74C3C;font-family:monospace;">{part}</span>')
-                        else:
-                            html_parts.append(f'<span style="font-family:monospace;">{part}</span>')
-                    return ''.join(html_parts)
-                
-                compacted_mask_html = format_compacted_mask(compacted_mask)
                 
                 # --- Side by side: Original JSON vs Optimized JSON ---
                 col_old, col_new = st.columns(2)
@@ -1826,14 +1764,12 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 
                 # --- Mask Details (expandable) ---
                 with st.expander("View Bit Mask Details", expanded=False):
-                    st.markdown("**Bit Mask (Binary)** - Colored by nibble value:")
-                    st.markdown(f'<div style="word-break:break-all;line-height:1.8;font-size:0.9rem;">{bit_mask_colored_html}</div>', unsafe_allow_html=True)
-                    st.markdown("")
-                    st.markdown("**HexMask** - Color-coded:")
-                    st.markdown(f'<div style="word-break:break-all;line-height:1.8;">{hex_mask_colored_html}</div>', unsafe_allow_html=True)
-                    st.markdown("")
-                    st.markdown("**Compacted Mask:**")
-                    st.markdown(f'<div style="word-break:break-all;line-height:1.6;">{compacted_mask_html}</div>', unsafe_allow_html=True)
+                    st.markdown("**Bit Mask (Binary)**")
+                    st.code(padded_mask, language=None)
+                    st.markdown("**HexMask**")
+                    st.code(hex_mask, language=None)
+                    st.markdown("**Compacted Mask**")
+                    st.code(compacted_mask, language=None)
                 
                 # --- Final Analysis ---
                 st.markdown("##### Compression Analysis")
