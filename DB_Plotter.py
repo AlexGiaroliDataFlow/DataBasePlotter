@@ -1871,18 +1871,19 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
         if 'type' in df_hm.columns:
             df_hm = df_hm[df_hm['type'] == selected_type_hm]
             
-        # Slider for number of samples
+        # Slider for number of samples (only show if more than 1 sample)
         if not df_hm.empty:
-            num_samples_hm = st.slider(
-                "Number of FFT Samples to Plot",
-                min_value=1,
-                max_value=len(df_hm),
-                value=len(df_hm),
-                step=1,
-                key="fft_count_slider",
-                help="Select number of samples to display, starting from the oldest."
-            )
-            df_hm = df_hm.iloc[:num_samples_hm]
+            if len(df_hm) > 1:
+                num_samples_hm = st.slider(
+                    "Number of FFT Samples to Plot",
+                    min_value=1,
+                    max_value=len(df_hm),
+                    value=len(df_hm),
+                    step=1,
+                    key="fft_count_slider",
+                    help="Select number of samples to display, starting from the oldest."
+                )
+                df_hm = df_hm.iloc[:num_samples_hm]
         
         if df_hm.empty:
             st.warning(f"No FFT data found for Axis: {selected_axis_hm}, Type: {selected_type_hm}")
