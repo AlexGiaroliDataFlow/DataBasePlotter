@@ -510,14 +510,13 @@ def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool 
                     comp_col_data = pd.to_numeric(comp_col_data, errors='coerce')
                 
                 if not comp_col_data.isna().all():
-                    # Trace 3: Raw Data (Comparison) - solid line, no transparency
+                    # Trace 3: Raw Data (Comparison) - dashed line for clear distinction
                     fig.add_trace(go.Scatter(
                         x=df_comp_aligned[x_axis],
                         y=comp_col_data,
                         mode='lines',
                         name=f'{col}{comp_suffix}',
-                        line=dict(color=comp_color, width=1),
-                        opacity=0.7,
+                        line=dict(color=comp_color, width=1.5, dash='dot'),
                         hovertemplate=f'{col}{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
                     ))
                     
@@ -525,13 +524,13 @@ def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool 
                     window_size_c = max(10, len(df_comp_aligned) // 50)
                     col_avg_c = comp_col_data.rolling(window=window_size_c, center=True).mean()
                     
-                    # Trace 4: Average (Comparison) - solid line
+                    # Trace 4: Average (Comparison) - dashed line for clear distinction
                     fig.add_trace(go.Scatter(
                         x=df_comp_aligned[x_axis],
                         y=col_avg_c,
                         mode='lines',
                         name=f'{col} Avg{comp_suffix}',
-                        line=dict(color=comp_color, width=2.5),
+                        line=dict(color=comp_color, width=2.5, dash='dot'),
                         hovertemplate=f'{col} Avg{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
                     ))
             
@@ -796,14 +795,13 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
                     comp_col_data = pd.to_numeric(comp_col_data, errors='coerce')
                 
                 if not comp_col_data.isna().all():
-                    # Trace 3: Raw (Comparison)
+                    # Trace 3: Raw (Comparison) - dashed for clear distinction
                     fig.add_trace(go.Scatter(
                         x=df_comp_aligned[x_axis],
                         y=comp_col_data,
                         mode='lines',
                         name=f'{display_name}{comp_suffix}',
-                        line=dict(color=comp_color, width=1),
-                        opacity=0.7,
+                        line=dict(color=comp_color, width=1.5, dash='dot'),
                         hovertemplate=f'{display_name}{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
                     ))
                     
@@ -811,13 +809,13 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
                     window_size_c = max(10, len(df_comp_aligned) // 50)
                     col_avg_c = comp_col_data.rolling(window=window_size_c, center=True).mean()
                     
-                    # Trace 4: Average (Comparison)
+                    # Trace 4: Average (Comparison) - dashed for clear distinction
                     fig.add_trace(go.Scatter(
                         x=df_comp_aligned[x_axis],
                         y=col_avg_c,
                         mode='lines',
                         name=f'{display_name} Avg{comp_suffix}',
-                        line=dict(color=comp_color, width=2.5),
+                        line=dict(color=comp_color, width=2.5, dash='dot'),
                         hovertemplate=f'{display_name} Avg{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
                     ))
             
@@ -1089,24 +1087,23 @@ def plot_tilt_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = 
             window_size_c = max(10, len(df_comp_aligned) // 50)
             df_comp_aligned['tilt_angle_avg'] = df_comp_aligned['tilt_angle'].rolling(window=window_size_c, center=True).mean()
             
-            # Trace 3: Raw Data (Comparison)
+            # Trace 3: Raw Data (Comparison) - dashed for clear distinction
             fig.add_trace(go.Scatter(
                 x=df_comp_aligned[x_axis],
                 y=df_comp_aligned['tilt_angle'],
                 mode='lines',
                 name=f'Tilt Angle{comp_suffix}',
-                line=dict(color=comp_tilt_color, width=1),
-                opacity=0.5,
+                line=dict(color=comp_tilt_color, width=1.5, dash='dot'),
                 hovertemplate=f'Tilt Angle{comp_suffix}: %{{y:.2f}} deg<br>Time: %{{x}}<extra></extra>'
             ))
             
-            # Trace 4: Average (Comparison)
+            # Trace 4: Average (Comparison) - dashed for clear distinction
             fig.add_trace(go.Scatter(
                 x=df_comp_aligned[x_axis],
                 y=df_comp_aligned['tilt_angle_avg'],
                 mode='lines',
                 name=f'Tilt Angle Avg{comp_suffix}',
-                line=dict(color=comp_tilt_color, width=3),
+                line=dict(color=comp_tilt_color, width=3, dash='dash'),
                 hovertemplate=f'Tilt Angle Avg{comp_suffix}: %{{y:.2f}} deg<br>Time: %{{x}}<extra></extra>'
             ))
 
