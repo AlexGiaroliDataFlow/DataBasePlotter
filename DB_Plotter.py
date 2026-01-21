@@ -1941,16 +1941,21 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             
             custom_blue_scale = [
                 [0.0, "rgb(15, 25, 50)"],    # Deep Navy base
-                [0.15, "rgb(30, 80, 180)"],  # Smooth transition starts later
-                [0.4, "rgb(60, 140, 230)"],  # Rich Blue
+                [0.4, "rgb(30, 80, 180)"],  # Smooth transition starts later
+                [0.6, "rgb(60, 140, 230)"],  # Rich Blue
                 [1.0, "rgb(160, 225, 255)"]  # Bright Blue highlight
             ]
             
             # Determine unit for heatmap hover
             heatmap_amplitude_unit = 'm/s²' if selected_type_hm == 'acceleration' else 'mm/s'
             
+            # Calculate zmax from current (filtered) data for proper color scaling
+            heatmap_zmax = max(max(row) for row in heatmap_data) if heatmap_data else 1
+            
             fig = go.Figure(data=go.Heatmap(
                 z=heatmap_data,
+                zmin=0,
+                zmax=heatmap_zmax,
                 x=freqs_hm,
                 y=y_labels,
                 colorscale=custom_blue_scale,
@@ -1971,7 +1976,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 margin=dict(l=50, r=50, t=60, b=50),
                 hovermode='closest'
             )
-            st.plotly_chart(fig, key="fft_heatmap", width="stretch")
+            st.plotly_chart(fig, key=f"fft_heatmap_{selected_axis_hm}_{selected_type_hm}", width="stretch")
             
             st.markdown("---")
             
