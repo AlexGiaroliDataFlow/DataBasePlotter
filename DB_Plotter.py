@@ -1399,6 +1399,21 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             fft_values = [row[col] if pd.notna(row[col]) else 0 for col in fft_cols[:freq_count]]
             frequencies = np.arange(freq_count)
             
+            # ═══ FFT UNIT CONVERSIONS ═══
+            # ACCELERATION: Database stores G (gravitational units)
+            #   → 1 G = 9.81 m/s²
+            #   → Formula: m/s² = G × 9.81
+            # VELOCITY: Firmware normalizes to (max_amplitude_g / 10) m/s
+            #   → To get mm/s: raw × (max_amplitude_g / 10) × 1000 = raw × max_amplitude_g × 100
+            #   → Formula: mm/s = raw × max_amplitude_g × 100
+            fft_type = row.get('type', 'acceleration')
+            if fft_type == 'acceleration':
+                fft_values = [v * 9.81 for v in fft_values]  # G → m/s²
+            elif fft_type == 'velocity':
+                max_amp_g = row.get('max_amplitude_g', 16)
+                if pd.notna(max_amp_g):
+                    fft_values = [v * float(max_amp_g) * 100 for v in fft_values]  # raw → mm/s
+            
             # --- Comparison Data ---
             comp_row = None
             comp_fft_values = []
@@ -1418,10 +1433,24 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                         comp_fft_values = comp_fft_values[:len(frequencies)]
                     elif len(comp_fft_values) < len(frequencies):
                         comp_fft_values += [0] * (len(frequencies) - len(comp_fft_values))
+                    
+                    # Apply same unit conversion to comparison data (see formulas above)
+                    comp_fft_type = comp_row.get('type', 'acceleration')
+                    if comp_fft_type == 'acceleration':
+                        comp_fft_values = [v * 9.81 for v in comp_fft_values]  # G → m/s²
+                    elif comp_fft_type == 'velocity':
+                        comp_max_amp_g = comp_row.get('max_amplitude_g', 16)
+                        if pd.notna(comp_max_amp_g):
+                            comp_fft_values = [v * float(comp_max_amp_g) * 100 for v in comp_fft_values]  # raw → mm/s
 
             # Calculate percentile thresholds
             primary_threshold = np.percentile(fft_values, percentile_value)
             comp_threshold = np.percentile(comp_fft_values, percentile_value) if comp_fft_values else None
+            
+            # Determine amplitude unit for hover templates
+            amplitude_unit = 'm/s²' if fft_type == 'acceleration' else 'mm/s'
+            comp_fft_type = comp_row.get('type', 'acceleration') if comp_row is not None else 'acceleration'
+            comp_amplitude_unit = 'm/s²' if comp_fft_type == 'acceleration' else 'mm/s'
             
             # Create Figure
             fig = go.Figure()
@@ -1439,7 +1468,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 y=fft_values,
                 name="Primary",
                 marker_color=primary_colors,
-                hovertemplate='<b>Primary</b><br>Freq: %{x:.0f} Hz<br>Amp: %{y:.4f}<extra></extra>'
+                hovertemplate=f'<b>Primary</b><br>Freq: %{{x:.0f}} Hz<br>Amp: %{{y:.4f}} {amplitude_unit}<extra></extra>'
             ))
 
             # --- Comparison Colors ---
@@ -1455,7 +1484,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     name="Comparison",
                     marker_color=comp_colors,
                     opacity=0.75,
-                    hovertemplate='<b>Comparison</b><br>Freq: %{x:.0f} Hz<br>Amp: %{y:.4f}<extra></extra>'
+                    hovertemplate=f'<b>Comparison</b><br>Freq: %{{x:.0f}} Hz<br>Amp: %{{y:.4f}} {comp_amplitude_unit}<extra></extra>'
                 ))
 
             # Add horizontal line for primary percentile
@@ -1476,8 +1505,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                         annotation_position="bottom right"
                     )
             
-            fft_type = row.get('type', 'acceleration')
-            amplitude_unit = 'G' if fft_type == 'acceleration' else 'mm/s'
+            # amplitude_unit already calculated above for hover templates
             
             title_text = f"FFT Spectrum - Sample {primary_idx + 1}"
             if comp_row is not None:
@@ -1897,6 +1925,16 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             
             for idx, row in df_hm.iterrows():
                 fft_vals = [row[col] if pd.notna(row[col]) else 0 for col in cols_hm]
+                
+                # Unit conversion: Acc G→9.81→m/s² | Vel raw×(max_amp_g×100)→mm/s
+                row_type = row.get('type', 'acceleration')
+                if row_type == 'acceleration':
+                    fft_vals = [v * 9.81 for v in fft_vals]  # G → m/s²
+                elif row_type == 'velocity':
+                    max_amp_g = row.get('max_amplitude_g', 16)
+                    if pd.notna(max_amp_g):
+                        fft_vals = [v * float(max_amp_g) * 100 for v in fft_vals]  # raw → mm/s
+                
                 heatmap_data.append(fft_vals)
                 interval = row.get('human_interval_of_analysis', f'Sample {idx}')
                 y_labels.append(str(interval))
@@ -1907,6 +1945,9 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 [0.4, "rgb(60, 140, 230)"],  # Rich Blue
                 [1.0, "rgb(160, 225, 255)"]  # Bright Blue highlight
             ]
+            
+            # Determine unit for heatmap hover
+            heatmap_amplitude_unit = 'm/s²' if selected_type_hm == 'acceleration' else 'mm/s'
             
             fig = go.Figure(data=go.Heatmap(
                 z=heatmap_data,
@@ -1919,7 +1960,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     len=0.8,
                     ticks='outside'
                 ),
-                hovertemplate='Frequency: %{x:.0f} Hz<br>Time: %{y}<br>Amplitude: %{z:.4f}<extra></extra>'
+                hovertemplate=f'Frequency: %{{x:.0f}} Hz<br>Time: %{{y}}<br>Amplitude: %{{z:.4f}} {heatmap_amplitude_unit}<extra></extra>'
             ))
             
             fig.update_layout(
@@ -2030,6 +2071,16 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             
             for idx, row in df_adv.iterrows():
                 vals = [row[col] if pd.notna(row[col]) else 0 for col in cols_adv]
+                
+                # Unit conversion: Acc G→9.81→m/s² | Vel raw×(max_amp_g×100)→mm/s
+                row_type = row.get('type', 'acceleration')
+                if row_type == 'acceleration':
+                    vals = [v * 9.81 for v in vals]  # G → m/s²
+                elif row_type == 'velocity':
+                    max_amp_g = row.get('max_amplitude_g', 16)
+                    if pd.notna(max_amp_g):
+                        vals = [v * float(max_amp_g) * 100 for v in vals]  # raw → mm/s
+                
                 spectra.append(vals)
                 ts = row.get('human_interval_of_analysis', f'Sample {idx}')
                 timestamps.append(str(ts))
