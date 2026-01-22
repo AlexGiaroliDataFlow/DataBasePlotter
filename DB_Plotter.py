@@ -1291,27 +1291,75 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
         st.warning("No FFT columns found.")
         return
     
-    # Determine number_of_points from first row (can be 500 or 1000)
-    # This value will be used for X-axis scaling in all FFT pages
-    default_num_points = len(fft_cols)
-    if 'number_of_points' in df.columns and not df['number_of_points'].dropna().empty:
-        first_row_points = df['number_of_points'].iloc[0]
-        if pd.notna(first_row_points):
-            default_num_points = int(first_row_points)
+    # Calculate Primary Dropdown Options & Defaults FIRST (to determine active FFT sample for plot settings)
+    dropdown_options = []
+    primary_prefix = f"[{primary_db_name}] " if primary_db_name else ""
     
-    # Store for use throughout the function
-    fft_num_points = default_num_points
+    for idx, row in df.iterrows():
+        axis = row.get('axis', 'N/A')  # X, Y, or Z
+        max_amplitude = row.get('max_amplitude_g', 'N/A')  # Amplitude in G
+        fft_type = row.get('type', 'N/A')  # acceleration or velocity
+        num_points = int(row.get('number_of_points', len(fft_cols)))
+        interval = row.get('human_interval_of_analysis', 'N/A')
+        
+        # Format amplitude
+        amplitude_str = f"{max_amplitude} G"
+        
+        label = f"{primary_prefix}{axis} | {amplitude_str} | {fft_type} | {num_points} Hz | {interval}"
+        dropdown_options.append(('primary', idx, label))
+    
+    # Determine default indices for X Acc and X Vel (from primary only)
+    idx_x_acc = None
+    idx_x_vel = None
+    
+    for i, (source, orig_idx, _) in enumerate(dropdown_options):
+        r = df.iloc[orig_idx]
+        r_axis = r.get('axis', 'N/A')
+        r_type = r.get('type', 'N/A')
+        
+        if idx_x_acc is None and r_axis == 'X' and r_type == 'acceleration':
+            idx_x_acc = i
+        
+        if idx_x_vel is None and r_axis == 'X' and r_type == 'velocity':
+            idx_x_vel = i
+            
+        if idx_x_acc is not None and idx_x_vel is not None:
+            break
+    
+    if idx_x_acc is None: idx_x_acc = 0
+    if idx_x_vel is None: idx_x_vel = 1 if len(dropdown_options) > 1 else 0
+
+    # Determine currently selected index (if previously selected in session state)
+    current_selected_idx = idx_x_acc # Default is X Acc
+    if "fft_selector_1" in st.session_state:
+        # Check if the saved index is valid for current dropdown (range check)
+        saved_idx = st.session_state["fft_selector_1"]
+        if 0 <= saved_idx < len(dropdown_options):
+            current_selected_idx = saved_idx
+            
+    # Get active number of points from the ACTUALLY SELECTED sample
+    if 0 <= current_selected_idx < len(dropdown_options):
+        _, active_row_idx, _ = dropdown_options[current_selected_idx]
+        active_row = df.iloc[active_row_idx]
+        active_num_points = int(active_row.get('number_of_points', len(fft_cols))) if pd.notna(active_row.get('number_of_points')) else len(fft_cols)
+        fft_num_points = active_num_points
+    else:
+        fft_num_points = len(fft_cols)
     
     # User-adjustable number of frequencies to plot (shared across all FFT subtabs)
-    # Default is fft_num_points (from first row), max is len(fft_cols)
+    # Default is fft_num_points (from selected row), max is len(fft_cols)
     max_freq_available = len(fft_cols)
+
+    # Key must be dynamic based on selected index AND DB to force reset when context changes
+    dynamic_key_freq = f"fft_freq_to_plot_{primary_db_name}_{current_selected_idx}"
+
     user_freq_to_plot = st.number_input(
         "Frequencies to Plot (Hz)",
         min_value=1,
         max_value=max_freq_available,
         value=min(fft_num_points, max_freq_available),
         step=50,
-        key="fft_freq_to_plot",
+        key=dynamic_key_freq,
         help=f"Number of frequencies to display. Default from database: {fft_num_points} Hz. Max available: {max_freq_available} Hz. NaN values are treated as 0."
     )
     
@@ -1319,23 +1367,6 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
     fft_tab1, fft_tab2, fft_tab3 = st.tabs(["FFT", "FFT in Time", "Advanced Analysis"])
     
     with fft_tab1:
-        # Build dropdown options with metadata from PRIMARY DB
-        # Format: [DB_NAME] axis, amplitude (G), type, Number of points, interval of analysis
-        dropdown_options = []
-        primary_prefix = f"[{primary_db_name}] " if primary_db_name else ""
-        
-        for idx, row in df.iterrows():
-            axis = row.get('axis', 'N/A')  # X, Y, or Z
-            max_amplitude = row.get('max_amplitude_g', 'N/A')  # Amplitude in G
-            fft_type = row.get('type', 'N/A')  # acceleration or velocity
-            num_points = int(row.get('number_of_points', len(fft_cols)))
-            interval = row.get('human_interval_of_analysis', 'N/A')
-            
-            # Format amplitude
-            amplitude_str = f"{max_amplitude} G"
-            
-            label = f"{primary_prefix}{axis} | {amplitude_str} | {fft_type} | {num_points} Hz | {interval}"
-            dropdown_options.append(('primary', idx, label))
         
         # Build dropdown options from COMPARISON DB if available
         comp_prefix = f"[{comparison_db_name}] " if comparison_db_name else "[Comp] "
@@ -1356,27 +1387,6 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     amplitude_str = f"{max_amplitude} G"
                     label = f"{comp_prefix}{axis} | {amplitude_str} | {fft_type} | {num_points} Hz | {interval}"
                     comparison_dropdown_options.append(('comparison', idx, label))
-        
-        # Determine default indices for X Acc and X Vel (from primary only)
-        idx_x_acc = None
-        idx_x_vel = None
-        
-        for i, (source, orig_idx, _) in enumerate(dropdown_options):
-            r = df.iloc[orig_idx]
-            r_axis = r.get('axis', 'N/A')
-            r_type = r.get('type', 'N/A')
-            
-            if idx_x_acc is None and r_axis == 'X' and r_type == 'acceleration':
-                idx_x_acc = i
-            
-            if idx_x_vel is None and r_axis == 'X' and r_type == 'velocity':
-                idx_x_vel = i
-                
-            if idx_x_acc is not None and idx_x_vel is not None:
-                break
-        
-        if idx_x_acc is None: idx_x_acc = 0
-        if idx_x_vel is None: idx_x_vel = 1 if len(dropdown_options) > 1 else 0
         
         # Percentile selector - Uses value from sidebar slider (defined in main breakdown)
         percentile_value = st.session_state.get("percentile_slider", 90)
