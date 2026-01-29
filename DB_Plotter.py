@@ -79,21 +79,30 @@ st.markdown("""
         color: #5DADE2 !important;
     }
     
-    /* Tab 4: Harmonics - Pastel Purple */
+    /* Tab 4: Compare - Teal */
     .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(4)[aria-selected="true"] {
-        background-color: #AF7AC5 !important;
+        background-color: #17A2B8 !important;
         color: white !important;
     }
     .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(4):not([aria-selected="true"]):hover {
-        color: #AF7AC5 !important;
+        color: #17A2B8 !important;
     }
     
-    /* Tab 5: GPS - Pastel Green */
+    /* Tab 5: Harmonics - Pastel Purple */
     .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(5)[aria-selected="true"] {
-        background-color: #58D68D !important;
+        background-color: #AF7AC5 !important;
         color: white !important;
     }
     .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(5):not([aria-selected="true"]):hover {
+        color: #AF7AC5 !important;
+    }
+    
+    /* Tab 6: GPS - Pastel Green */
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(6)[aria-selected="true"] {
+        background-color: #58D68D !important;
+        color: white !important;
+    }
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(6):not([aria-selected="true"]):hover {
         color: #58D68D !important;
     }
 
@@ -2254,6 +2263,206 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
              st.error(f"Issue detected with FFT Data: {stats['total_lost']} total lost packets.")
 
 
+def plot_comparison_data(conn: sqlite3.Connection):
+    """Create normalized interactive comparison graphs for all time series data."""
+    
+    st.subheader("Data Comparison")
+    
+    # Collect all available data sources
+    available_data = {}
+    
+    # Helper to process dataframe columns
+    def process_columns(key_prefix, table_name, df):
+        if df.empty: return
+        
+        # 1. Coerce object columns to numeric where possible
+        for col in df.columns:
+            if col not in EXCLUDE_METADATA_COLS and df[col].dtype == 'object':
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # 2. Filter valid numeric columns
+        numeric_cols = [col for col in df.columns 
+                      if col not in EXCLUDE_METADATA_COLS 
+                      and pd.api.types.is_numeric_dtype(df[col])
+                      and df[col].notna().any()] # Must have at least one value
+        
+        for col in numeric_cols:
+            available_data[f"{key_prefix}: {col}"] = (table_name, col, df)
+
+    # Load and process data
+    if check_table_exists(conn, 'sensor_data'):
+        process_columns("Sensor", 'sensor_data', get_table_data(conn, 'sensor_data'))
+        
+    if check_table_exists(conn, 'power_analyzer_data'):
+        process_columns("Power", 'power_analyzer_data', get_table_data(conn, 'power_analyzer_data'))
+            
+    if check_table_exists(conn, 'tilt_data'):
+        process_columns("Tilt", 'tilt_data', get_table_data(conn, 'tilt_data'))
+    
+    if not available_data:
+        st.warning("No time series data available for comparison.")
+        return
+    
+    # --- Time Range Slider ---
+    all_mins = []
+    all_maxs = []
+    checked_dfs = set()
+    
+    for _, _, df in available_data.values():
+        if id(df) in checked_dfs: continue
+        checked_dfs.add(id(df))
+        if 'datetime' in df.columns and not df['datetime'].isna().all():
+            all_mins.append(df['datetime'].min())
+            all_maxs.append(df['datetime'].max())
+            
+    if not all_mins or not all_maxs:
+        st.warning("No valid timestamps found in data.")
+        return # Cannot plot without time
+    else:
+        min_date_global = min(all_mins)
+        max_date_global = max(all_maxs)
+        
+        date_range = st.slider(
+            "Select Date/Time Range",
+            min_value=min_date_global.to_pydatetime(),
+            max_value=max_date_global.to_pydatetime(),
+            value=(min_date_global.to_pydatetime(), max_date_global.to_pydatetime()),
+            step=timedelta(seconds=1),
+            format="DD/MM/YY HH:mm:ss",
+            key="comparison_range_slider"
+        )
+    
+    
+    # Categorize keys
+    sensor_keys = [k for k in available_data.keys() if k.startswith("Sensor:")]
+    tilt_keys = [k for k in available_data.keys() if k.startswith("Tilt:")]
+    combined_sensor_keys = sensor_keys + tilt_keys
+    power_keys = [k for k in available_data.keys() if k.startswith("Power:")]
+    
+    # Selection UI with Multiselects
+    c1, c2 = st.columns(2)
+    
+    selected_series = []
+    
+    with c1:
+        # Helper format function to clean labels
+        def format_sensor_label(k):
+            if k.startswith("Sensor: "): return k.replace("Sensor: ", "")
+            if k.startswith("Tilt: "): return k.replace("Tilt: ", "")
+            return k
+
+        sel_sensors = st.multiselect(
+            "Sensors",
+            options=combined_sensor_keys,
+            format_func=format_sensor_label,
+            key="multiselect_sensors"
+        )
+        selected_series.extend(sel_sensors)
+        
+    with c2:
+        def format_power_label(k):
+            return k.replace("Power: ", "")
+            
+        sel_power = st.multiselect(
+            "Power Analyzer",
+            options=power_keys,
+            format_func=format_power_label,
+            key="multiselect_power"
+        )
+        selected_series.extend(sel_power)
+
+    # Raw vs Mean Toggle
+    show_raw = st.toggle("Show Raw Data", value=False, help="Toggle to see raw data instead of smoothed mean.")
+
+    if not selected_series:
+        return
+    
+    # Build the normalized comparison data
+    fig = go.Figure()
+    
+    comparison_colors = [
+        '#17A2B8', '#E74C3C', '#58D68D', '#F4D03F', '#AF7AC5', 
+        '#E67E22', '#3498DB', '#EC7063', '#45B39D', '#9B59B6'
+    ]
+    
+    legend_info = []
+    
+    for idx, series_name in enumerate(selected_series):
+        table_name, col_name, df = available_data[series_name]
+        
+        if 'datetime' not in df.columns: continue
+        
+        # Filter by Date Range
+        mask = (df['datetime'] >= date_range[0]) & (df['datetime'] <= date_range[1])
+        df_filtered = df[mask].copy()
+            
+        if df_filtered.empty: continue
+        
+        x_data = df_filtered['datetime']
+        y_data = df_filtered[col_name]
+        
+        original_values = y_data.copy()
+        
+        # Apply Smoothing if requested (otherwise keep raw)
+        if not show_raw:
+            # Automatic Smoothing
+            window_size = max(10, len(y_data) // 50)
+            y_data = y_data.rolling(window=window_size, min_periods=1, center=True).mean()
+        
+        # Normalize
+        y_min = y_data.min()
+        y_max = y_data.max()
+        if y_max - y_min > 0:
+            y_normalized = (y_data - y_min) / (y_max - y_min)
+        else:
+            y_normalized = y_data * 0
+        
+        color = comparison_colors[idx % len(comparison_colors)]
+        
+        # Custom Hover text
+        hover_text = [
+            f"<b>{col_name}</b><br>Time: {x}<br>Original: {orig:.4f}<br>Norm: {norm:.4f}"
+            for x, orig, norm in zip(x_data, original_values, y_normalized)
+        ]
+        
+        fig.add_trace(go.Scatter(
+            x=x_data,
+            y=y_normalized,
+            mode='lines',
+            name=col_name, # Display clean name in legend
+            line=dict(color=color, width=1.5 if show_raw else 2.5),
+            hovertext=hover_text,
+            hoverinfo='text',
+            customdata=original_values.values,
+            opacity=0.8 if show_raw else 1.0
+        ))
+        
+        legend_info.append({'name': col_name, 'color': color})
+    
+    fig.update_layout(
+        title="Normalized Data Comparison",
+        xaxis_title="Time",
+        yaxis_title="Normalized Value (0-1)",
+        height=550,
+        hovermode='x unified',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        yaxis=dict(range=[-0.05, 1.05], tickformat='.2f')
+    )
+    
+    st.plotly_chart(fig, width="stretch", key="comparison_chart")
+    
+    # Custom Legend below (optional, since plotly has one, but this provides colors purely)
+    if legend_info:
+        st.markdown("**Active Series:**")
+        color_html = " ".join([
+            f'<span style="display:inline-block; width:12px; height:12px; background-color:{item["color"]}; border-radius:50%; margin-right:4px;"></span>'
+            f'<span style="margin-right:12px; font-size:0.9em; color:#555;">{item["name"]}</span>'
+            for item in legend_info
+        ])
+        st.markdown(color_html, unsafe_allow_html=True)
+
+
+
 def plot_harmonics_data(conn: sqlite3.Connection, available_tables: list, show_quality: bool = True):
     """Create interactive bar charts for harmonics data (Voltage and Current harmonics)."""
     
@@ -2848,7 +3057,8 @@ def main():
         mqtt_stats = MqttStats()
 
     # Create tabs for different data types
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "Compare",
         "Sensors",
         "Power Analyzer",
         "FFT",
@@ -2856,7 +3066,12 @@ def main():
         "GPS"
     ])
     
+    # Tab 1: Compare
     with tab1:
+        plot_comparison_data(conn)
+    
+    # Tab 2: Sensors
+    with tab2:
         df_sensor_res = None
         cols_sensor_res = []
         x_axis_res = None
@@ -2930,9 +3145,9 @@ def main():
                 # Fallback: only tilt exists
                 df_tilt_filtered, x_axis_res = create_date_range_slider(df_tilt_raw, "tilt_only")
                 plot_tilt_data(df_tilt_filtered, x_axis_res, show_quality, show_mqtt_calc, mqtt_interval, mqtt_stats)
-
     
-    with tab2:
+    # Tab 3: Power Analyzer
+    with tab3:
         if check_table_exists(conn, 'power_analyzer_data'):
             df_power = get_table_data(conn, 'power_analyzer_data')
             
@@ -2940,7 +3155,6 @@ def main():
             empty_power_cols = get_empty_columns(df_power, EXCLUDE_METADATA_COLS)
             if empty_power_cols:
                 st.warning(f"⚠️ **Empty Parameters (No Data):** {', '.join(empty_power_cols)}")
-            
             
             # Load comparison power analyzer data if enabled
             df_power_comp = None
@@ -2957,7 +3171,8 @@ def main():
         else:
             st.warning("Power analyzer data table not found in database.")
     
-    with tab3:
+    # Tab 4: FFT
+    with tab4:
         if check_table_exists(conn, 'fft_data'):
             df_fft = get_table_data(conn, 'fft_data')
             
@@ -2975,8 +3190,9 @@ def main():
             )
         else:
             st.warning("FFT data table not found in database.")
-    
-    with tab4:
+            
+    # Tab 5: Harmonics
+    with tab5:
         # Check for any harmonics tables
         harmonics_tables = ['V_harmonic_L1', 'V_harmonic_L2', 'V_harmonic_L3', 
                            'I_harmonic_L1', 'I_harmonic_L2', 'I_harmonic_L3']
@@ -2987,7 +3203,8 @@ def main():
         else:
             st.warning("No harmonics data tables found in database.")
     
-    with tab5:
+    # Tab 6: GPS
+    with tab6:
         if check_table_exists(conn, 'gps_data'):
             df_gps = get_table_data(conn, 'gps_data')
             plot_gps_data(df_gps)
