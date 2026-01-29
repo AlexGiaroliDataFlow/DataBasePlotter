@@ -40,68 +40,61 @@ st.markdown("""
         background-color: #f0f2f6;
         border-radius: 8px;
         padding: 10px 20px;
-        color: #31333F; /* Force dark text for visibility on light background in Dark Mode */
-        transition: color 0.3s ease; /* Smooth transition for hover effect */
+        color: #31333F;
+        transition: color 0.3s ease;
     }
     
-    /* Generic selected tab style (fallback) */
+    /* Generic selected tab style (fallback for all tabs including subtabs) */
     .stTabs [aria-selected="true"] {
         background-color: #7eb8da;
-        color: white !important; /* Force white text on selected tab */
+        color: white !important;
     }
 
-    /* --- Main Tabs Specific Colors --- */
+    /* --- Main Tabs Specific Colors (5 main tabs only) --- */
     
     /* Tab 1: Sensors - Pastel Yellow */
-    .stTabs [data-baseweb="tab-list"] button:nth-of-type(1)[aria-selected="true"] {
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(1)[aria-selected="true"] {
         background-color: #F4D03F !important;
         color: black !important;
     }
-    /* Hover Effect for Tab 1 (Unselected) */
-    .stTabs [data-baseweb="tab-list"] button:nth-of-type(1):not([aria-selected="true"]):hover {
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(1):not([aria-selected="true"]):hover {
         color: #F4D03F !important;
     }
     
     /* Tab 2: Power Analyzer - Vivid Orange */
-    .stTabs [data-baseweb="tab-list"] button:nth-of-type(2)[aria-selected="true"] {
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(2)[aria-selected="true"] {
         background-color: #E67E22 !important;
         color: white !important;
     }
-    /* Hover Effect for Tab 2 (Unselected) */
-    .stTabs [data-baseweb="tab-list"] button:nth-of-type(2):not([aria-selected="true"]):hover {
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(2):not([aria-selected="true"]):hover {
         color: #E67E22 !important;
     }
     
     /* Tab 3: FFT - Pastel Blue */
-    .stTabs [data-baseweb="tab-list"] button:nth-of-type(3)[aria-selected="true"] {
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(3)[aria-selected="true"] {
         background-color: #5DADE2 !important;
         color: white !important;
     }
-    /* Hover Effect for Tab 3 (Unselected) */
-    .stTabs [data-baseweb="tab-list"] button:nth-of-type(3):not([aria-selected="true"]):hover {
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(3):not([aria-selected="true"]):hover {
         color: #5DADE2 !important;
     }
     
-    /* Tab 4: GPS - Pastel Green */
-    .stTabs [data-baseweb="tab-list"] button:nth-of-type(4)[aria-selected="true"] {
+    /* Tab 4: Harmonics - Pastel Purple */
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(4)[aria-selected="true"] {
+        background-color: #AF7AC5 !important;
+        color: white !important;
+    }
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(4):not([aria-selected="true"]):hover {
+        color: #AF7AC5 !important;
+    }
+    
+    /* Tab 5: GPS - Pastel Green */
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(5)[aria-selected="true"] {
         background-color: #58D68D !important;
         color: white !important;
     }
-    /* Hover Effect for Tab 4 (Unselected) */
-    .stTabs [data-baseweb="tab-list"] button:nth-of-type(4):not([aria-selected="true"]):hover {
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(5):not([aria-selected="true"]):hover {
         color: #58D68D !important;
-    }
-
-    /* --- Nested/Sub Tabs (FFT) --- */
-    /* This target allows styling subtabs inside any parent tab container to match the parent if needed.
-       Since we only have subtabs in FFT, we force them to match FFT's now Blue theme. */
-    .stTabs .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
-        background-color: #5DADE2 !important;
-        color: white !important;
-    }
-    /* Subtab Hover - also Blue */
-    .stTabs .stTabs [data-baseweb="tab-list"] button:not([aria-selected="true"]):hover {
-        color: #5DADE2 !important;
     }
 
     /* Hide red indicator under tabs */
@@ -2261,6 +2254,225 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
              st.error(f"Issue detected with FFT Data: {stats['total_lost']} total lost packets.")
 
 
+def plot_harmonics_data(conn: sqlite3.Connection, available_tables: list, show_quality: bool = True):
+    """Create interactive bar charts for harmonics data (Voltage and Current harmonics)."""
+    
+    st.subheader("Harmonics Analysis")
+    
+    # Blue accent info box (consistent with app theme)
+    st.markdown("""
+    <div style="background-color: rgba(93, 173, 226, 0.2); border-left: 4px solid #5DADE2; padding: 12px 16px; border-radius: 4px; margin-bottom: 16px;">
+        <strong style="color: #5DADE2;">Description:</strong> 55 harmonics of the 50Hz fundamental frequency (50Hz to 2750Hz).
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Separate voltage and current tables
+    v_tables = [t for t in available_tables if t.startswith('V_')]
+    i_tables = [t for t in available_tables if t.startswith('I_')]
+    
+    # Create subtabs for Voltage and Current
+    harm_tab1, harm_tab2 = st.tabs(["Voltage Harmonics", "Current Harmonics"])
+    
+    def get_harmonics_df(table_name: str) -> pd.DataFrame:
+        """Load harmonics data from a table."""
+        df = get_table_data(conn, table_name)
+        # Convert datetime if present
+        if 'human_timestamp' in df.columns:
+            try:
+                df['datetime'] = pd.to_datetime(df['human_timestamp'], format='%d/%m/%Y - %H:%M:%S')
+            except:
+                pass
+        return df
+    
+    def get_harmonic_columns(df: pd.DataFrame, prefix: str) -> list:
+        """Get harmonics columns in order (fundamental, 2nd, 3rd, ..., 55th)."""
+        # Pattern: V_L1_f (fundamental), V_L1_2, V_L1_3, ..., V_L1_55
+        # or: I_L1_f, I_L1_2, etc.
+        harmonic_cols = []
+        # First the fundamental
+        f_col = f"{prefix}_f"
+        if f_col in df.columns:
+            harmonic_cols.append(f_col)
+        # Then 2 through 55
+        for i in range(2, 56):
+            col = f"{prefix}_{i}"
+            if col in df.columns:
+                harmonic_cols.append(col)
+        return harmonic_cols
+    
+    def plot_harmonics_bar(df: pd.DataFrame, table_name: str, prefix: str, unit: str, color: str, selected_idx: int):
+        """Plot harmonics as bar chart similar to FFT."""
+        harmonic_cols = get_harmonic_columns(df, prefix)
+        
+        if not harmonic_cols:
+            st.warning(f"No harmonic columns found for {table_name}")
+            return
+        
+        if selected_idx >= len(df):
+            st.warning(f"Selected index out of range for {table_name}")
+            return
+        
+        # Get selected row
+        row = df.iloc[selected_idx]
+        
+        # Extract harmonic values
+        harmonic_values = [row[col] if pd.notna(row[col]) else 0 for col in harmonic_cols]
+        
+        # Generate frequencies (50Hz = fundamental, then 100Hz, 150Hz, ... up to 2750Hz)
+        frequencies = [50 * (i + 1) for i in range(len(harmonic_values))]  # 50, 100, 150, ..., 2750
+        
+        # Create bar chart
+        fig = go.Figure()
+        
+        fig.add_trace(go.Bar(
+            x=frequencies,
+            y=harmonic_values,
+            name=table_name,
+            marker_color=color,
+            hovertemplate=f'<b>{table_name}</b><br>Freq: %{{x:.0f}} Hz<br>Amplitude: %{{y:.4f}} {unit}<extra></extra>'
+        ))
+        
+        # Extract phase from table name (L1, L2, or L3)
+        phase = table_name.split('_')[-1] if '_' in table_name else ''
+        harm_type = "Voltage" if table_name.startswith('V_') else "Current"
+        
+        fig.update_layout(
+            title=f'{harm_type} Harmonics - Phase {phase}',
+            xaxis_title='Frequency (Hz)',
+            yaxis_title=f'Amplitude ({unit})',
+            height=450,
+            xaxis=dict(
+                tickmode='linear',
+                dtick=250,  # Show tick every 250Hz
+                range=[0, 2800]
+            ),
+            hovermode='x unified',
+            bargap=0.1
+        )
+        
+        st.plotly_chart(fig, width="stretch", key=f"harmonics_chart_{table_name}")
+        
+        # Show statistics
+        with st.expander(f"Harmonics Statistics - {table_name}", expanded=False):
+            # Calculate stats
+            fundamental = harmonic_values[0] if harmonic_values else 0
+            thd = 0
+            if fundamental > 0 and len(harmonic_values) > 1:
+                # THD = sqrt(sum of squares of harmonics) / fundamental * 100%
+                harmonic_sum_sq = sum(v**2 for v in harmonic_values[1:])
+                thd = (harmonic_sum_sq ** 0.5) / fundamental * 100
+            
+            # Find top 5 harmonics (excluding fundamental)
+            if len(harmonic_values) > 1:
+                indexed_harmonics = [(i+2, frequencies[i+1], harmonic_values[i+1]) for i in range(len(harmonic_values)-1)]
+                top_harmonics = sorted(indexed_harmonics, key=lambda x: x[2], reverse=True)[:5]
+            else:
+                top_harmonics = []
+            
+            col_s1, col_s2, col_s3 = st.columns(3)
+            with col_s1:
+                st.metric("Fundamental (50Hz)", f"{fundamental:.4f} {unit}")
+            with col_s2:
+                st.metric("THD", f"{thd:.2f}%", help="Total Harmonic Distortion")
+            with col_s3:
+                st.metric("Total Harmonics", len(harmonic_values))
+            
+            if top_harmonics:
+                st.markdown("**Top 5 Harmonics (excl. fundamental):**")
+                for h_num, h_freq, h_val in top_harmonics:
+                    st.caption(f"• {h_num}th harmonic ({h_freq}Hz): {h_val:.4f} {unit}")
+    
+    # Voltage Harmonics Tab
+    with harm_tab1:
+        if v_tables:
+            # Load all dataframes first to get timestamps
+            v_dataframes = {}
+            all_timestamps = []
+            
+            for v_table in sorted(v_tables):
+                df_v = get_harmonics_df(v_table)
+                if not df_v.empty:
+                    v_dataframes[v_table] = df_v
+                    if not all_timestamps:  # Get timestamps from first table
+                        for idx, row in df_v.iterrows():
+                            ts = row.get('human_timestamp', f'Sample {idx}')
+                            all_timestamps.append((idx, ts))
+            
+            if v_dataframes and all_timestamps:
+                # Single selector for all voltage phases
+                selected_idx = st.selectbox(
+                    "Select Sample (All Voltage Phases)",
+                    options=range(len(all_timestamps)),
+                    format_func=lambda i: all_timestamps[i][1],
+                    key="harmonic_voltage_selector"
+                )
+                
+                st.markdown("---")
+                
+                # Create columns for each phase
+                v_cols = st.columns(len(v_dataframes))
+                
+                # Plot data for all voltage tables with same index
+                for i, (v_table, df_v) in enumerate(v_dataframes.items()):
+                    with v_cols[i]:
+                        # Extract prefix (e.g., V_L1 from V_harmonic_L1)
+                        parts = v_table.split('_')  # ['V', 'harmonic', 'L1']
+                        prefix = f"{parts[0]}_{parts[-1]}"  # V_L1
+                        # Use different shades of blue for phases
+                        colors = ['#5DADE2', '#3498DB', '#2E86C1']
+                        color = colors[i % len(colors)]
+                        plot_harmonics_bar(df_v, v_table, prefix, "V", color, selected_idx)
+            else:
+                st.warning("No voltage data found")
+        else:
+            st.warning("No voltage harmonics tables found.")
+    
+    # Current Harmonics Tab
+    with harm_tab2:
+        if i_tables:
+            # Load all dataframes first to get timestamps
+            i_dataframes = {}
+            all_timestamps = []
+            
+            for i_table in sorted(i_tables):
+                df_i = get_harmonics_df(i_table)
+                if not df_i.empty:
+                    i_dataframes[i_table] = df_i
+                    if not all_timestamps:  # Get timestamps from first table
+                        for idx, row in df_i.iterrows():
+                            ts = row.get('human_timestamp', f'Sample {idx}')
+                            all_timestamps.append((idx, ts))
+            
+            if i_dataframes and all_timestamps:
+                # Single selector for all current phases
+                selected_idx = st.selectbox(
+                    "Select Sample (All Current Phases)",
+                    options=range(len(all_timestamps)),
+                    format_func=lambda i: all_timestamps[i][1],
+                    key="harmonic_current_selector"
+                )
+                
+                st.markdown("---")
+                
+                # Create columns for each phase
+                i_cols = st.columns(len(i_dataframes))
+                
+                # Plot data for all current tables with same index
+                for i, (i_table, df_i) in enumerate(i_dataframes.items()):
+                    with i_cols[i]:
+                        # Extract prefix (e.g., I_L1 from I_harmonic_L1)
+                        parts = i_table.split('_')  # ['I', 'harmonic', 'L1']
+                        prefix = f"{parts[0]}_{parts[-1]}"  # I_L1
+                        # Use different shades of blue for current phases
+                        colors = ['#5DADE2', '#3498DB', '#2E86C1']
+                        color = colors[i % len(colors)]
+                        plot_harmonics_bar(df_i, i_table, prefix, "A", color, selected_idx)
+            else:
+                st.warning("No current data found")
+        else:
+            st.warning("No current harmonics tables found.")
+
+
 def plot_gps_data(df: pd.DataFrame):
     """Display GPS data on an interactive map."""
     if df.empty:
@@ -2636,10 +2848,11 @@ def main():
         mqtt_stats = MqttStats()
 
     # Create tabs for different data types
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "Sensors",
         "Power Analyzer",
         "FFT",
+        "Harmonics",
         "GPS"
     ])
     
@@ -2764,6 +2977,17 @@ def main():
             st.warning("FFT data table not found in database.")
     
     with tab4:
+        # Check for any harmonics tables
+        harmonics_tables = ['V_harmonic_L1', 'V_harmonic_L2', 'V_harmonic_L3', 
+                           'I_harmonic_L1', 'I_harmonic_L2', 'I_harmonic_L3']
+        available_harmonics = [t for t in harmonics_tables if check_table_exists(conn, t)]
+        
+        if available_harmonics:
+            plot_harmonics_data(conn, available_harmonics, show_quality)
+        else:
+            st.warning("No harmonics data tables found in database.")
+    
+    with tab5:
         if check_table_exists(conn, 'gps_data'):
             df_gps = get_table_data(conn, 'gps_data')
             plot_gps_data(df_gps)
