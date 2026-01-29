@@ -392,6 +392,39 @@ def check_table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     return cursor.fetchone() is not None
 
 
+def get_empty_columns(df: pd.DataFrame, exclude_cols: list = None) -> list:
+    """Identify columns that are present but contain no data."""
+    if df.empty:
+        return []
+    
+    if exclude_cols is None:
+        exclude_cols = []
+        
+    empty_cols = []
+    # Define placeholder values that indicate missing data
+    empty_placeholders = {'no value', 'no sensor', 'nan', 'none', 'n/a', ''}
+    
+    for col in df.columns:
+        if col in exclude_cols:
+            continue
+        
+        # Check if all values are null/nan
+        if df[col].isna().all():
+            empty_cols.append(col)
+            continue
+            
+        # Check if all values are empty placeholder strings
+        # Convert to string and lowercase for comparison
+        col_values = df[col].astype(str).str.lower().str.strip()
+        unique_values = set(col_values.unique())
+        
+        # If all unique values are in the empty placeholders set, mark as empty
+        if unique_values.issubset(empty_placeholders):
+            empty_cols.append(col)
+            
+    return empty_cols
+
+
 def create_date_range_slider(df: pd.DataFrame, key_prefix: str):
     """Create a date range slider and return filtered dataframe."""
     if 'datetime' not in df.columns or df['datetime'].isna().all():
@@ -2632,6 +2665,11 @@ def main():
                 df_tilt_comp = get_table_data(comp_conn, 'tilt_data')
 
         if not df_sensors_raw.empty:
+            # Check for empty sensors
+            empty_sensors = get_empty_columns(df_sensors_raw, EXCLUDE_METADATA_COLS)
+            if empty_sensors:
+                st.warning(f"⚠️ **Disconnected Sensors (No Data):** {', '.join(empty_sensors)}")
+
             # Use sensors as primary for range
             df_sensors_filtered, x_axis_res = create_date_range_slider(df_sensors_raw, "sensor_unified")
             
@@ -2684,6 +2722,12 @@ def main():
     with tab2:
         if check_table_exists(conn, 'power_analyzer_data'):
             df_power = get_table_data(conn, 'power_analyzer_data')
+            
+            # Check for empty parameters
+            empty_power_cols = get_empty_columns(df_power, EXCLUDE_METADATA_COLS)
+            if empty_power_cols:
+                st.warning(f"⚠️ **Empty Parameters (No Data):** {', '.join(empty_power_cols)}")
+            
             
             # Load comparison power analyzer data if enabled
             df_power_comp = None
