@@ -1334,7 +1334,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
     if "fft_selector_1" in st.session_state:
         # Check if the saved index is valid for current dropdown (range check)
         saved_idx = st.session_state["fft_selector_1"]
-        if 0 <= saved_idx < len(dropdown_options):
+        if isinstance(saved_idx, int) and 0 <= saved_idx < len(dropdown_options):
             current_selected_idx = saved_idx
             
     # Get active number of points from the ACTUALLY SELECTED sample
