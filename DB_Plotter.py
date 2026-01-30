@@ -2343,7 +2343,8 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
              st.error(f"Issue detected with FFT Data: {stats['total_lost']} total lost packets.")
 
 
-def plot_comparison_data(conn: sqlite3.Connection):
+
+def plot_comparison_data(conn: sqlite3.Connection, comp_conn: sqlite3.Connection = None, primary_label: str = "Primary", comparison_label: str = "Comparison"):
     """Create normalized interactive comparison graphs for all time series data."""
     
     st.subheader("Data Comparison")
@@ -2352,7 +2353,7 @@ def plot_comparison_data(conn: sqlite3.Connection):
     available_data = {}
     
     # Helper to process dataframe columns
-    def process_columns(key_prefix, table_name, df):
+    def process_columns(key_prefix, table_name, df, source_prefix=""):
         if df.empty: return
         
         # 1. Coerce object columns to numeric where possible
@@ -2367,21 +2368,63 @@ def plot_comparison_data(conn: sqlite3.Connection):
                       and df[col].notna().any()] # Must have at least one value
         
         for col in numeric_cols:
-            available_data[f"{key_prefix}: {col}"] = (table_name, col, df)
+            # Create a unique key including source prefix if applicable
+            full_key = f"{source_prefix}{key_prefix}: {col}"
+            available_data[full_key] = (table_name, col, df)
 
-    # Load and process data
+    # Determine prefixes for display
+    p_prefix = f"{primary_label} - " if comp_conn else ""
+    c_prefix = f"{comparison_label} - " if comp_conn else ""
+
+    # Load and process PRIMARY data
     if check_table_exists(conn, 'sensor_data'):
-        process_columns("Sensor", 'sensor_data', get_table_data(conn, 'sensor_data'))
+        process_columns("Sensor", 'sensor_data', get_table_data(conn, 'sensor_data'), p_prefix)
         
     if check_table_exists(conn, 'power_analyzer_data'):
-        process_columns("Power", 'power_analyzer_data', get_table_data(conn, 'power_analyzer_data'))
+        process_columns("Power", 'power_analyzer_data', get_table_data(conn, 'power_analyzer_data'), p_prefix)
             
     if check_table_exists(conn, 'tilt_data'):
-        process_columns("Tilt", 'tilt_data', get_table_data(conn, 'tilt_data'))
+        process_columns("Tilt", 'tilt_data', get_table_data(conn, 'tilt_data'), p_prefix)
+    
+    # Load and process COMPARISON data
+    if comp_conn:
+        if check_table_exists(comp_conn, 'sensor_data'):
+            process_columns("Sensor", 'sensor_data', get_table_data(comp_conn, 'sensor_data'), c_prefix)
+            
+        if check_table_exists(comp_conn, 'power_analyzer_data'):
+            process_columns("Power", 'power_analyzer_data', get_table_data(comp_conn, 'power_analyzer_data'), c_prefix)
+                
+        if check_table_exists(comp_conn, 'tilt_data'):
+            process_columns("Tilt", 'tilt_data', get_table_data(comp_conn, 'tilt_data'), c_prefix)
     
     if not available_data:
         st.warning("No time series data available for comparison.")
         return
+    
+    # --- Calculate Global Start Times (for relative alignment) ---
+    primary_start_time = None
+    comp_start_time = None
+    
+    # Helper to find min time across a list of dataframes
+    def get_global_min_time(keys_filter):
+        mins = []
+        checked_ids = set()
+        for k, (_, _, df) in available_data.items():
+            if keys_filter(k):
+                if id(df) in checked_ids: continue
+                checked_ids.add(id(df))
+                if 'datetime' in df.columns and not df['datetime'].isna().all():
+                    mins.append(df['datetime'].min())
+        return min(mins) if mins else None
+
+    # Filter logic using the prefixes p_prefix and c_prefix defined earlier
+    if comp_conn:
+        primary_start_time = get_global_min_time(lambda k: k.startswith(p_prefix))
+        comp_start_time = get_global_min_time(lambda k: k.startswith(c_prefix))
+    else:
+        # Single database mode
+        primary_start_time = get_global_min_time(lambda k: True)
+
     
     # --- Time Range Slider ---
     all_mins = []
@@ -2413,48 +2456,124 @@ def plot_comparison_data(conn: sqlite3.Connection):
         )
     
     
-    # Categorize keys
-    sensor_keys = [k for k in available_data.keys() if k.startswith("Sensor:")]
-    tilt_keys = [k for k in available_data.keys() if k.startswith("Tilt:")]
-    combined_sensor_keys = sensor_keys + tilt_keys
-    power_keys = [k for k in available_data.keys() if k.startswith("Power:")]
-    
-    # Selection UI with Multiselects
-    c1, c2 = st.columns(2)
-    
+    # --- Data Selection UI ---
     selected_series = []
     
-    with c1:
-        # Helper format function to clean labels
-        def format_sensor_label(k):
-            if k.startswith("Sensor: "): return k.replace("Sensor: ", "")
-            if k.startswith("Tilt: "): return k.replace("Tilt: ", "")
-            return k
+    # Helper to clean labels for display (removes the long prefix)
+    # The prefix is already evident from the section header
+    def clean_label(k, prefix_to_remove):
+        # Remove the source prefix first
+        s = k.replace(prefix_to_remove, "")
+        # Remove the type identifier "Sensor: " or "Tilt: ", etc
+        s = s.replace("Sensor: ", "").replace("Tilt: ", "").replace("Power: ", "")
+        return s
 
-        sel_sensors = st.multiselect(
-            "Sensors",
-            options=combined_sensor_keys,
-            format_func=format_sensor_label,
-            key="multiselect_sensors"
-        )
-        selected_series.extend(sel_sensors)
+    if comp_conn:
+        # --- Split View: Primary vs Comparison ---
         
-    with c2:
-        def format_power_label(k):
-            return k.replace("Power: ", "")
+        # 1. Primary DB Section
+        st.markdown(f"#### **{primary_label}** (Primary)")
+        c1a, c1b = st.columns(2)
+        
+        # Filter keys for Primary
+        p_sensor_keys = [k for k in available_data.keys() if k.startswith(p_prefix) and ("Sensor:" in k or "Tilt:" in k)]
+        p_power_keys = [k for k in available_data.keys() if k.startswith(p_prefix) and "Power:" in k]
+        
+        with c1a:
+            sel_p_sens = st.multiselect(
+                "Sensors",
+                options=p_sensor_keys,
+                format_func=lambda k: clean_label(k, p_prefix),
+                key="p_multiselect_sensors"
+            )
+            selected_series.extend(sel_p_sens)
             
-        sel_power = st.multiselect(
-            "Power Analyzer",
-            options=power_keys,
-            format_func=format_power_label,
-            key="multiselect_power"
-        )
-        selected_series.extend(sel_power)
+        with c1b:
+            sel_p_pow = st.multiselect(
+                "Power Analyzer",
+                options=p_power_keys,
+                format_func=lambda k: clean_label(k, p_prefix),
+                key="p_multiselect_power"
+            )
+            selected_series.extend(sel_p_pow)
+            
+        # 2. Comparison DB Section
+        st.markdown(f"#### **{comparison_label}** (Comparison)")
+        c2a, c2b = st.columns(2)
+        
+        # Filter keys for Comparison
+        c_sensor_keys = [k for k in available_data.keys() if k.startswith(c_prefix) and ("Sensor:" in k or "Tilt:" in k)]
+        c_power_keys = [k for k in available_data.keys() if k.startswith(c_prefix) and "Power:" in k]
+        
+        with c2a:
+            sel_c_sens = st.multiselect(
+                "Sensors",
+                options=c_sensor_keys,
+                format_func=lambda k: clean_label(k, c_prefix),
+                key="c_multiselect_sensors"
+            )
+            selected_series.extend(sel_c_sens)
+            
+        with c2b:
+            sel_c_pow = st.multiselect(
+                "Power Analyzer",
+                options=c_power_keys,
+                format_func=lambda k: clean_label(k, c_prefix),
+                key="c_multiselect_power"
+            )
+            selected_series.extend(sel_c_pow)
+            
+    else:
+        # --- Single Database View (Legacy) ---
+        sensor_keys = [k for k in available_data.keys() if "Sensor:" in k or "Tilt:" in k]
+        power_keys = [k for k in available_data.keys() if "Power:" in k]
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            sel_sensors = st.multiselect(
+                "Sensors",
+                options=sensor_keys,
+                format_func=lambda k: clean_label(k, ""),
+                key="multiselect_sensors"
+            )
+            selected_series.extend(sel_sensors)
+        with c2:
+            sel_power = st.multiselect(
+                "Power Analyzer",
+                options=power_keys,
+                format_func=lambda k: clean_label(k, ""),
+                key="multiselect_power"
+            )
+            selected_series.extend(sel_power)
 
-    # Raw vs Mean Toggle
-    show_raw = st.toggle("Show Raw Data", value=False, help="Toggle to see raw data instead of smoothed mean.")
+    # Analysis Toggles
+    t_col1, t_col2 = st.columns(2)
+    with t_col1:
+        show_raw = st.toggle("Show Raw Data", value=False, help="Toggle to see raw data instead of smoothed mean.")
+    with t_col2:
+         disable_norm = st.toggle("Disable Normalization", value=False, help="Toggle to show actual values instead of normalized 0-1 range.")
 
     if not selected_series:
+        st.markdown("""
+        <div style="
+            display: flex; 
+            flex-direction: column;
+            justify_content: center; 
+            align_items: center; 
+            text-align: center;
+            width: 100%;
+            height: 800px; 
+            border: 2px dashed #e0e0e0; 
+            border-radius: 10px; 
+            color: #b0b0b0; 
+            font-size: 2rem; 
+            font-weight: 500;
+            background-color: #fafafa;
+            opacity: 0.7;
+        ">
+            Select tags to compare data
+        </div>
+        """, unsafe_allow_html=True)
         return
     
     # Build the normalized comparison data
@@ -2489,27 +2608,42 @@ def plot_comparison_data(conn: sqlite3.Connection):
             window_size = max(10, len(y_data) // 50)
             y_data = y_data.rolling(window=window_size, min_periods=1, center=True).mean()
         
-        # Normalize
-        y_min = y_data.min()
-        y_max = y_data.max()
-        if y_max - y_min > 0:
-            y_normalized = (y_data - y_min) / (y_max - y_min)
+        if disable_norm:
+             y_normalized = y_data
         else:
-            y_normalized = y_data * 0
+            # Normalize
+            y_min = y_data.min()
+            y_max = y_data.max()
+            if y_max - y_min > 0:
+                y_normalized = (y_data - y_min) / (y_max - y_min)
+            else:
+                y_normalized = y_data * 0
         
         color = comparison_colors[idx % len(comparison_colors)]
+
+        # Calculate relative time (0 = start of the respective DB recording)
+        dataset_start_time = None
+        if comp_conn and series_name.startswith(c_prefix):
+             dataset_start_time = comp_start_time
+        else:
+             dataset_start_time = primary_start_time
+             
+        # Fallback if something went wrong (shouldn't happen if data exists)
+        if dataset_start_time is None: dataset_start_time = df['datetime'].min()
+
+        x_relative = (x_data - dataset_start_time).dt.total_seconds()
         
         # Custom Hover text
         hover_text = [
-            f"<b>{col_name}</b><br>Time: {x}<br>Original: {orig:.4f}<br>Norm: {norm:.4f}"
-            for x, orig, norm in zip(x_data, original_values, y_normalized)
+            f"<b>{col_name}</b><br>Value: {val:.4f}<br>Time: {x:%d/%m/%Y - %H:%M:%S}"
+            for x, val in zip(x_data, y_data)
         ]
         
         fig.add_trace(go.Scatter(
-            x=x_data,
+            x=x_relative,
             y=y_normalized,
             mode='lines',
-            name=col_name, # Display clean name in legend
+            name=series_name, # Display full name in legend (including prefix)
             line=dict(color=color, width=1.5 if show_raw else 2.5),
             hovertext=hover_text,
             hoverinfo='text',
@@ -2517,21 +2651,28 @@ def plot_comparison_data(conn: sqlite3.Connection):
             opacity=0.8 if show_raw else 1.0
         ))
         
-        legend_info.append({'name': col_name, 'color': color})
+        legend_info.append({'name': series_name, 'color': color})
     
+    # Dynamic layout settings
+    y_title = "Value" if disable_norm else "Normalized Value (0-1)"
+    chart_title = "Data Comparison" if disable_norm else "Normalized Data Comparison"
+    y_axis_config = dict(tickformat='.2f') # Allow auto-range if not normalized
+    if not disable_norm:
+         y_axis_config['range'] = [-0.05, 1.05]
+
     fig.update_layout(
-        title="Normalized Data Comparison",
-        xaxis_title="Time",
-        yaxis_title="Normalized Value (0-1)",
-        height=550,
+        title=chart_title,
+        xaxis_title="Time (seconds relative to start)",
+        yaxis_title=y_title,
+        height=800,
         hovermode='x unified',
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        yaxis=dict(range=[-0.05, 1.05], tickformat='.2f')
+        yaxis=y_axis_config
     )
     
     st.plotly_chart(fig, width="stretch", key="comparison_chart")
     
-    # Custom Legend below (optional, since plotly has one, but this provides colors purely)
+    # Custom Legend below
     if legend_info:
         st.markdown("**Active Series:**")
         color_html = " ".join([
@@ -3148,7 +3289,12 @@ def main():
     
     # Tab 1: Compare
     with tab1:
-        plot_comparison_data(conn)
+        plot_comparison_data(
+            conn,
+            comp_conn=comp_conn if enable_comparison else None,
+            primary_label=primary_db_name,
+            comparison_label=comp_db_name
+        )
     
     # Tab 2: Sensors
     with tab2:
