@@ -50,42 +50,42 @@ st.markdown("""
         color: white !important;
     }
 
-    /* --- Main Tabs Specific Colors (5 main tabs only) --- */
+    /* --- Main Tabs Specific Colors (6 main tabs) --- */
     
-    /* Tab 1: Sensors - Pastel Yellow */
+    /* Tab 1: Compare - Pastel Blue (Requested) */
     .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(1)[aria-selected="true"] {
+        background-color: #7EB8DA !important;
+        color: white !important;
+    }
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(1):not([aria-selected="true"]):hover {
+        color: #7EB8DA !important;
+    }
+    
+    /* Tab 2: Sensors - Pastel Yellow */
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(2)[aria-selected="true"] {
         background-color: #F4D03F !important;
         color: black !important;
     }
-    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(1):not([aria-selected="true"]):hover {
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(2):not([aria-selected="true"]):hover {
         color: #F4D03F !important;
     }
     
-    /* Tab 2: Power Analyzer - Vivid Orange */
-    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(2)[aria-selected="true"] {
+    /* Tab 3: Power Analyzer - Vivid Orange */
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(3)[aria-selected="true"] {
         background-color: #E67E22 !important;
         color: white !important;
     }
-    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(2):not([aria-selected="true"]):hover {
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(3):not([aria-selected="true"]):hover {
         color: #E67E22 !important;
     }
     
-    /* Tab 3: FFT - Pastel Blue */
-    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(3)[aria-selected="true"] {
+    /* Tab 4: FFT - Pastel Blue */
+    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(4)[aria-selected="true"] {
         background-color: #5DADE2 !important;
         color: white !important;
     }
-    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(3):not([aria-selected="true"]):hover {
-        color: #5DADE2 !important;
-    }
-    
-    /* Tab 4: Compare - Teal */
-    .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(4)[aria-selected="true"] {
-        background-color: #17A2B8 !important;
-        color: white !important;
-    }
     .stTabs > div > [data-baseweb="tab-list"] > button:nth-of-type(4):not([aria-selected="true"]):hover {
-        color: #17A2B8 !important;
+        color: #5DADE2 !important;
     }
     
     /* Tab 5: Harmonics - Pastel Purple */
@@ -113,9 +113,89 @@ st.markdown("""
     .stTabs [data-baseweb="tab-border"] {
         display: none !important;
     }
-    /* Gray slider track */
+
+    /* Multiselect chips color - Blue to match Compare Tab */
+    .stMultiSelect [data-baseweb="tag"] {
+        background-color: #7EB8DA !important;
+        color: white !important;
+    }
+    .stMultiSelect [data-baseweb="tag"] span {
+        color: white !important;
+    }
+        /* --- Global Interactive Component Styling (Blue Theme #7EB8DA) --- */
+    
+    /* 1. SLIDERS */
+    /* Track (Gray) */
     .stSlider > div > div > div > div {
         background: #808080 !important;
+    }
+    /* Thumb/Handle */
+    .stSlider [data-baseweb="slider"] [role="slider"] {
+        background-color: #7EB8DA !important;
+        border-color: #7EB8DA !important;
+    }
+    /* Value Text (Timestamp/Number above slider) */
+    .stSlider [data-testid="stMarkdownContainer"] p {
+        color: #7EB8DA !important;
+    }
+    /* Ensure all text inside the slider widget (like ticks or direct values) uses the blue */
+    .stSlider [data-baseweb="slider"] div {
+        color: #7EB8DA !important;
+    }
+
+    /* 2. MULTISELECT & SELECTBOX */
+    /* Borders */
+    .stMultiSelect [data-baseweb="select"] > div,
+    .stSelectbox [data-baseweb="select"] > div {
+        border-color: #7EB8DA !important;
+    }
+    /* Focus State */
+    .stMultiSelect [data-baseweb="select"]:focus-within > div,
+    .stSelectbox [data-baseweb="select"]:focus-within > div {
+        border-color: #7EB8DA !important;
+        box-shadow: 0 0 0 1px #7EB8DA !important;
+    }
+    /* Dropdown Icons */
+    .stMultiSelect [data-baseweb="select"] [data-testid="stIcon"],
+    .stSelectbox [data-baseweb="select"] [data-testid="stIcon"] {
+        color: #7EB8DA !important;
+    }
+    /* Selected Chips (Multiselect) */
+    .stMultiSelect [data-baseweb="tag"] {
+        background-color: #7EB8DA !important;
+        color: white !important;
+    }
+    .stMultiSelect [data-baseweb="tag"] span {
+        color: white !important;
+    }
+
+    /* 3. TOGGLES & CHECKBOXES */
+    /* Toggle Switch (Active) */
+    .stToggle [aria-checked="true"] {
+        background-color: #7EB8DA !important;
+        color: white !important;
+    }
+    /* Checkbox (Active) */
+    .stCheckbox [data-baseweb="checkbox"] [aria-checked="true"] {
+        background-color: #7EB8DA !important;
+        border-color: #7EB8DA !important;
+    }
+    
+    /* 4. NUMBER INPUT */
+    .stNumberInput [data-baseweb="input"] {
+        border-color: #7EB8DA !important;
+    }
+    .stNumberInput [data-baseweb="input"]:focus-within {
+        box-shadow: 0 0 0 1px #7EB8DA !important;
+    }
+    /* Plus/Minus buttons */
+    .stNumberInput button {
+        color: #7EB8DA !important;
+        border-color: #7EB8DA !important;
+    }
+    .stNumberInput button:hover {
+        background-color: #7EB8DA !important;
+        color: white !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -2381,8 +2461,8 @@ def plot_comparison_data(conn: sqlite3.Connection):
     fig = go.Figure()
     
     comparison_colors = [
-        '#17A2B8', '#E74C3C', '#58D68D', '#F4D03F', '#AF7AC5', 
-        '#E67E22', '#3498DB', '#EC7063', '#45B39D', '#9B59B6'
+        '#7EB8DA', '#E74C3C', '#2ECC71', '#F39C12', '#9B59B6', 
+        '#34495E', '#16A085', '#D35400', '#7F8C8D', '#C0392B'
     ]
     
     legend_info = []
