@@ -2347,6 +2347,16 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
 def plot_comparison_data(conn: sqlite3.Connection, comp_conn: sqlite3.Connection = None, primary_label: str = "Primary", comparison_label: str = "Comparison"):
     """Create normalized interactive comparison graphs for all time series data."""
     
+    # Initialize session state for toggles
+    if 'compare_show_raw' not in st.session_state:
+        st.session_state.compare_show_raw = False
+    if 'compare_disable_norm' not in st.session_state:
+        st.session_state.compare_disable_norm = False
+    
+    # Read toggle values from session state
+    show_raw = st.session_state.compare_show_raw
+    disable_norm = st.session_state.compare_disable_norm
+    
     st.subheader("Data Comparison")
     
     # Collect all available data sources
@@ -2546,19 +2556,14 @@ def plot_comparison_data(conn: sqlite3.Connection, comp_conn: sqlite3.Connection
             )
             selected_series.extend(sel_power)
 
-    # Analysis Toggles
-    t_col1, t_col2 = st.columns(2)
-    with t_col1:
-        show_raw = st.toggle("Show Raw Data", value=False, help="Toggle to see raw data instead of smoothed mean.")
-    with t_col2:
-         disable_norm = st.toggle("Disable Normalization", value=False, help="Toggle to show actual values instead of normalized 0-1 range.")
+    # Analysis Toggles - moved below chart
 
     if not selected_series:
         st.markdown("""
         <div style="
             display: flex; 
             flex-direction: column;
-            justify_content: center; 
+            justify-content: center; 
             align_items: center; 
             text-align: center;
             width: 100%;
@@ -2681,6 +2686,13 @@ def plot_comparison_data(conn: sqlite3.Connection, comp_conn: sqlite3.Connection
             for item in legend_info
         ])
         st.markdown(color_html, unsafe_allow_html=True)
+    
+    # Analysis Toggles below chart
+    t_col1, t_col2 = st.columns(2)
+    with t_col1:
+        st.toggle("Show Raw Data", key="compare_show_raw", help="Toggle to see raw data instead of smoothed mean.")
+    with t_col2:
+        st.toggle("Disable Normalization", key="compare_disable_norm", help="Toggle to show actual values instead of normalized 0-1 range.")
 
 
 
