@@ -1477,7 +1477,20 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
         key=dynamic_key_freq,
         help=f"Number of frequencies to display. Default from database: {fft_num_points} Hz. Max available: {max_freq_available} Hz. NaN values are treated as 0."
     )
-    
+
+    c_div, c_cut, c_cut_input, c_cut_label, c_space = st.columns([0.15, 0.15, 0.08, 0.07, 0.55])
+    with c_div:
+        st.markdown('<div style="margin-top: 14px;"></div>', unsafe_allow_html=True) # visual alignment
+        divide_by_2 = st.toggle("Divide / 2", value=False, key="divide_by_2_toggle", help="Divides all amplitudes by 2. Except 0Hz")
+    with c_cut:
+        st.markdown('<div style="margin-top: 14px;"></div>', unsafe_allow_html=True) # visual alignment
+        cut_low_freq = st.toggle("Cut Low Freq", value=False, key="cut_low_freq_toggle", help="Removes low frequencies.")
+    with c_cut_input:
+        st.markdown('<div style="margin-top: 14px;"></div>', unsafe_allow_html=True) # visual alignment
+        cut_threshold = st.number_input("Cut Hz", min_value=1, value=3, step=1, key="cut_thresh_input", label_visibility="collapsed")
+    with c_cut_label:
+        st.markdown('<div style="margin-top: 22px; white-space: nowrap;">Cut Hz</div>', unsafe_allow_html=True)
+
     # Create subtabs
     fft_tab1, fft_tab2, fft_tab3 = st.tabs(["FFT", "FFT in Time", "Advanced Analysis"])
     
@@ -1507,7 +1520,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
         percentile_value = st.session_state.get("percentile_slider", 90)
         
         # Helper function to plot FFT with optional comparison (supports cross-database)
-        def plot_fft_comparison(primary_source: str, primary_idx: int, comp_source: str = None, comparison_idx: int = None, update_global_stats: bool = False, p_col=PASTEL_COLORS[3], c_col='#E67E22'):
+        def plot_fft_comparison(primary_source: str, primary_idx: int, comp_source: str = None, comparison_idx: int = None, update_global_stats: bool = False, p_col=PASTEL_COLORS[3], c_col='#E67E22', p_label="Primary", c_label="Comparison"):
             # --- Primary Data ---
             if primary_source == 'primary':
                 row = df.iloc[primary_idx]
@@ -1539,6 +1552,18 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 if pd.notna(max_amp_g):
                     fft_values = [v * float(max_amp_g) * 100 for v in fft_values]  # raw → mm/s
             
+            if cut_low_freq:
+                if len(fft_values) > cut_threshold:
+                    fft_values = fft_values[cut_threshold:]
+                    frequencies = frequencies[cut_threshold:]
+                else:
+                    fft_values = []
+                    frequencies = np.array([])
+            
+            if divide_by_2:
+                # Divide by 2 ONLY if frequency is not 0Hz
+                fft_values = [v / 2.0 if f != 0 else v for v, f in zip(fft_values, frequencies)]
+            
             # --- Comparison Data ---
             comp_row = None
             comp_fft_values = []
@@ -1567,6 +1592,17 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                         comp_max_amp_g = comp_row.get('max_amplitude_g', 16)
                         if pd.notna(comp_max_amp_g):
                             comp_fft_values = [v * float(comp_max_amp_g) * 100 for v in comp_fft_values]  # raw → mm/s
+                    
+                    if cut_low_freq:
+                        if len(comp_fft_values) > cut_threshold:
+                            comp_fft_values = comp_fft_values[cut_threshold:]
+                        else:
+                            comp_fft_values = []
+                        
+                    if divide_by_2:
+                        # Divide by 2 ONLY if frequency is not 0Hz
+                        # Note: frequencies array matches length of aligned data
+                        comp_fft_values = [v / 2.0 if f != 0 else v for v, f in zip(comp_fft_values, frequencies)]
 
             # Calculate percentile thresholds
             primary_threshold = np.percentile(fft_values, percentile_value)
@@ -1591,9 +1627,9 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             fig.add_trace(go.Bar(
                 x=frequencies,
                 y=fft_values,
-                name="Primary",
+                name=p_label,
                 marker_color=primary_colors,
-                hovertemplate=f'<b>Primary</b><br>Freq: %{{x:.0f}} Hz<br>Amp: %{{y:.4f}} {amplitude_unit}<extra></extra>'
+                hovertemplate=f'<b>{p_label}</b><br>Freq: %{{x:.0f}} Hz<br>Amp: %{{y:.4f}} {amplitude_unit}<extra></extra>'
             ))
 
             # --- Comparison Colors ---
@@ -1606,10 +1642,10 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 fig.add_trace(go.Bar(
                     x=frequencies,
                     y=comp_fft_values,
-                    name="Comparison",
+                    name=c_label,
                     marker_color=comp_colors,
                     opacity=0.75,
-                    hovertemplate=f'<b>Comparison</b><br>Freq: %{{x:.0f}} Hz<br>Amp: %{{y:.4f}} {comp_amplitude_unit}<extra></extra>'
+                    hovertemplate=f'<b>{c_label}</b><br>Freq: %{{x:.0f}} Hz<br>Amp: %{{y:.4f}} {comp_amplitude_unit}<extra></extra>'
                 ))
 
             # Add horizontal line for primary percentile
@@ -1660,6 +1696,20 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 ),
                 hovermode='x unified'
             )
+            
+            # Explicitly mark the start frequency as requested (ONLY if cut is enabled)
+            if cut_low_freq and len(frequencies) > 0:
+                start_f = frequencies[0]
+                fig.add_vline(
+                    x=start_f,
+                    line_width=1,
+                    line_dash="dot",
+                    line_color="#888",
+                    opacity=0.7,
+                    annotation_text=f"{int(start_f)}Hz",
+                    annotation_position="top right",
+                    annotation_font=dict(size=12, color="#555")
+                )
             
             st.plotly_chart(fig, key=f"fft_plot_combined", width="stretch")
             
@@ -1962,33 +2012,38 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             p_color_choice = st.color_picker("Primary", value=PASTEL_COLORS[3], key="p_color_picker", label_visibility="hidden")
         
         # Get primary source and index
-        primary_source, primary_row_idx, _ = dropdown_options[selected_idx_1]
+        primary_source, primary_row_idx, primary_label_str = dropdown_options[selected_idx_1]
         
         # Comparison Selector - include both DBs
         # Format: (source, idx, label) where source is 'primary' or 'comparison'
         none_option = [('none', -1, "None")]
         all_comp_options = none_option + dropdown_options + comparison_dropdown_options
         
-        col_c1, col_c2 = st.columns([0.85, 0.15])
-        with col_c1:
-            selected_comp_idx = st.selectbox(
-                "Comparison FFT Sample",
-                options=range(len(all_comp_options)),
-                format_func=lambda x: all_comp_options[x][2],  # Use label from 3-tuple
-                key="fft_selector_2",
-                index=0  # Default to None
-            )
-        with col_c2:
-            c_color_choice = st.color_picker("Compare", value='#E67E22', key="c_color_picker", label_visibility="hidden")
+        # Only show Comparison Selector if df_comparison is active
+        if df_comparison is not None and not df_comparison.empty:
+            col_c1, col_c2 = st.columns([0.85, 0.15])
+            with col_c1:
+                selected_comp_idx = st.selectbox(
+                    "Comparison FFT Sample",
+                    options=range(len(all_comp_options)),
+                    format_func=lambda x: all_comp_options[x][2],  # Use label from 3-tuple
+                    key="fft_selector_2",
+                    index=0  # Default to None
+                )
+            with col_c2:
+                c_color_choice = st.color_picker("Compare", value='#E67E22', key="c_color_picker", label_visibility="hidden")
+        else:
+             selected_comp_idx = 0 # Default to 'None' option (index 0 in all_comp_options which starts with none)
+             c_color_choice = '#E67E22'
         
         # Get comparison source and index
-        comp_source, comp_row_idx, _ = all_comp_options[selected_comp_idx]
+        comp_source, comp_row_idx, comp_label_str = all_comp_options[selected_comp_idx]
         if comp_source == 'none':
             comp_row_idx = None
             comp_source = None
 
         # Plot
-        plot_fft_comparison(primary_source, primary_row_idx, comp_source, comp_row_idx, update_global_stats=True, p_col=p_color_choice, c_col=c_color_choice)
+        plot_fft_comparison(primary_source, primary_row_idx, comp_source, comp_row_idx, update_global_stats=True, p_col=p_color_choice, c_col=c_color_choice, p_label=primary_label_str, c_label=comp_label_str)
     # Common filters for subtabs 2 and 3
     # Get available axes and types
     available_axes = df['axis'].dropna().unique().tolist() if 'axis' in df.columns else ['X', 'Y', 'Z']
@@ -2046,6 +2101,12 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             max_freq_points = min(user_freq_to_plot, len(fft_cols))
             
             freqs_hm = np.arange(max_freq_points)
+            if cut_low_freq:
+                 if len(freqs_hm) > 3:
+                      freqs_hm = freqs_hm[3:]
+                 else:
+                      freqs_hm = np.array([])
+            
             cols_hm = fft_cols[:max_freq_points]
             
             for idx, row in df_hm.iterrows():
@@ -2059,6 +2120,13 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     max_amp_g = row.get('max_amplitude_g', 16)
                     if pd.notna(max_amp_g):
                         fft_vals = [v * float(max_amp_g) * 100 for v in fft_vals]  # raw → mm/s
+                
+                if cut_low_freq:
+                    if len(fft_vals) > 3:
+                        fft_vals = fft_vals[3:]
+                    else:
+                        fft_vals = []
+                    fft_vals = [v / 2.0 for v in fft_vals]
                 
                 heatmap_data.append(fft_vals)
                 interval = row.get('human_interval_of_analysis', f'Sample {idx}')
@@ -2188,6 +2256,11 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             
             # Use user_freq_to_plot (user-adjustable, shared across tabs) for frequency axis
             freqs_adv = np.arange(min(user_freq_to_plot, len(fft_cols)))
+            if cut_low_freq:
+                 if len(freqs_adv) > 3:
+                      freqs_adv = freqs_adv[3:]
+                 else:
+                      freqs_adv = np.array([])
             hz_per_bin = 1.0
             
             # Calculate default values for energy bands based on user_freq_to_plot
@@ -2210,6 +2283,13 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     max_amp_g = row.get('max_amplitude_g', 16)
                     if pd.notna(max_amp_g):
                         vals = [v * float(max_amp_g) * 100 for v in vals]  # raw → mm/s
+
+                if cut_low_freq:
+                    if len(vals) > 3:
+                        vals = vals[3:]
+                    else:
+                        vals = []
+                    vals = [v / 2.0 for v in vals]
                 
                 spectra.append(vals)
                 ts = row.get('human_interval_of_analysis', f'Sample {idx}')
@@ -2265,6 +2345,10 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             # Convert Hz thresholds to indices
             low_idx = int(low_band_max / hz_per_bin)
             med_idx = int(med_band_max / hz_per_bin)
+            
+            if cut_low_freq:
+                low_idx = max(0, low_idx - 3)
+                med_idx = max(low_idx, med_idx - 3)
             
             # Clamp indices to the frequency range
             max_freq_idx = len(freqs_adv)
