@@ -1482,7 +1482,10 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
         help=f"Number of frequencies to display. Default from database: {fft_num_points} Hz. Max available: {max_freq_available} Hz. NaN values are treated as 0."
     )
 
-    c_div, c_cut, c_cut_input, c_cut_label, c_space = st.columns([0.15, 0.15, 0.08, 0.07, 0.55])
+    c_style, c_div, c_cut, c_cut_input, c_cut_label, c_space = st.columns([0.12, 0.12, 0.12, 0.08, 0.07, 0.49])
+    with c_style:
+        st.markdown('<div style="margin-top: 14px;"></div>', unsafe_allow_html=True) # visual alignment
+        line_view = st.toggle("Line View", value=False, key="fft_line_view_toggle", help="Switch between Bars and Continuous Line.")
     with c_div:
         st.markdown('<div style="margin-top: 14px;"></div>', unsafe_allow_html=True) # visual alignment
         divide_by_2 = st.toggle("Divide / 2", value=False, key="divide_by_2_toggle", help="Divides all amplitudes by 2. Except 0Hz")
@@ -1622,35 +1625,56 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
 
             # --- Primary Colors ---
             primary_colors = p_col
-            if show_mqtt_calc:
+            if show_mqtt_calc and not line_view: # Only use dynamic colors for BAR chart
                 # Use dynamic darker color for peaks
                 darker_p = adjust_color_brightness(p_col, 0.6) 
                 primary_colors = [darker_p if v > primary_threshold else p_col for v in fft_values]
 
             # Plot Primary
-            fig.add_trace(go.Bar(
-                x=frequencies,
-                y=fft_values,
-                name=p_label,
-                marker_color=primary_colors,
-                hovertemplate=f'<b>{p_label}</b><br>Freq: %{{x:.0f}} Hz<br>Amp: %{{y:.4f}} {amplitude_unit}<extra></extra>'
-            ))
+            if line_view:
+                 fig.add_trace(go.Scatter(
+                    x=frequencies,
+                    y=fft_values,
+                    name=p_label,
+                    mode='lines',
+                    line=dict(color=p_col, width=2),
+                    hovertemplate=f'<b>{p_label}</b><br>Freq: %{{x:.0f}} Hz<br>Amp: %{{y:.4f}} {amplitude_unit}<extra></extra>'
+                ))
+            else:
+                fig.add_trace(go.Bar(
+                    x=frequencies,
+                    y=fft_values,
+                    name=p_label,
+                    marker_color=primary_colors,
+                    hovertemplate=f'<b>{p_label}</b><br>Freq: %{{x:.0f}} Hz<br>Amp: %{{y:.4f}} {amplitude_unit}<extra></extra>'
+                ))
 
             # --- Comparison Colors ---
             if comp_fft_values:
                 comp_colors = c_col
-                if show_mqtt_calc:
+                if show_mqtt_calc and not line_view:
                     darker_c = adjust_color_brightness(c_col, 0.6)
                     comp_colors = [darker_c if v > comp_threshold else c_col for v in comp_fft_values]
 
-                fig.add_trace(go.Bar(
-                    x=frequencies,
-                    y=comp_fft_values,
-                    name=c_label,
-                    marker_color=comp_colors,
-                    opacity=0.75,
-                    hovertemplate=f'<b>{c_label}</b><br>Freq: %{{x:.0f}} Hz<br>Amp: %{{y:.4f}} {comp_amplitude_unit}<extra></extra>'
-                ))
+                if line_view:
+                    fig.add_trace(go.Scatter(
+                        x=frequencies,
+                        y=comp_fft_values,
+                        name=c_label,
+                        mode='lines',
+                        line=dict(color=c_col, width=2, dash='dot'),
+                        opacity=0.75,
+                        hovertemplate=f'<b>{c_label}</b><br>Freq: %{{x:.0f}} Hz<br>Amp: %{{y:.4f}} {comp_amplitude_unit}<extra></extra>'
+                    ))
+                else:
+                    fig.add_trace(go.Bar(
+                        x=frequencies,
+                        y=comp_fft_values,
+                        name=c_label,
+                        marker_color=comp_colors,
+                        opacity=0.75,
+                        hovertemplate=f'<b>{c_label}</b><br>Freq: %{{x:.0f}} Hz<br>Amp: %{{y:.4f}} {comp_amplitude_unit}<extra></extra>'
+                    ))
 
             # Add horizontal line for primary percentile
             if show_mqtt_calc:
@@ -2106,8 +2130,8 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             
             freqs_hm = np.arange(max_freq_points)
             if cut_low_freq:
-                 if len(freqs_hm) > 3:
-                      freqs_hm = freqs_hm[3:]
+                 if len(freqs_hm) > cut_threshold:
+                      freqs_hm = freqs_hm[cut_threshold:]
                  else:
                       freqs_hm = np.array([])
             
@@ -2126,10 +2150,12 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                         fft_vals = [v * float(max_amp_g) * 100 for v in fft_vals]  # raw → mm/s
                 
                 if cut_low_freq:
-                    if len(fft_vals) > 3:
-                        fft_vals = fft_vals[3:]
+                    if len(fft_vals) > cut_threshold:
+                        fft_vals = fft_vals[cut_threshold:]
                     else:
                         fft_vals = []
+                
+                if divide_by_2:
                     fft_vals = [v / 2.0 for v in fft_vals]
                 
                 heatmap_data.append(fft_vals)
@@ -2261,8 +2287,8 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             # Use user_freq_to_plot (user-adjustable, shared across tabs) for frequency axis
             freqs_adv = np.arange(min(user_freq_to_plot, len(fft_cols)))
             if cut_low_freq:
-                 if len(freqs_adv) > 3:
-                      freqs_adv = freqs_adv[3:]
+                 if len(freqs_adv) > cut_threshold:
+                      freqs_adv = freqs_adv[cut_threshold:]
                  else:
                       freqs_adv = np.array([])
             hz_per_bin = 1.0
@@ -2289,10 +2315,12 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                         vals = [v * float(max_amp_g) * 100 for v in vals]  # raw → mm/s
 
                 if cut_low_freq:
-                    if len(vals) > 3:
-                        vals = vals[3:]
+                    if len(vals) > cut_threshold:
+                        vals = vals[cut_threshold:]
                     else:
                         vals = []
+                
+                if divide_by_2:
                     vals = [v / 2.0 for v in vals]
                 
                 spectra.append(vals)
@@ -2351,8 +2379,8 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             med_idx = int(med_band_max / hz_per_bin)
             
             if cut_low_freq:
-                low_idx = max(0, low_idx - 3)
-                med_idx = max(low_idx, med_idx - 3)
+                low_idx = max(0, low_idx - cut_threshold)
+                med_idx = max(low_idx, med_idx - cut_threshold)
             
             # Clamp indices to the frequency range
             max_freq_idx = len(freqs_adv)
