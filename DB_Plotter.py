@@ -1766,7 +1766,8 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             # Metrics Columns
             # We will show: Label | Primary | Comparison
             
-            cols = st.columns(5)
+            with st.columns([0.75, 0.25])[0]:
+                cols = st.columns(5)
             labels = ["Max Amp", "Min Amp", "Mean Amp", "Ground Avg"]
             keys = ['max', 'min', 'mean', 'ground']
             
@@ -1790,38 +1791,41 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                         else:
                              c_val_str = f"{stats_comp[key]:.4f} {amplitude_unit}"
                     
+                    comp_html = ""
+                    if stats_comp:
+                         comp_html = f'<div style="color:{c_col}; font-size:1.8rem; line-height:1.2; margin-top: 5px; font-weight:bold;">{c_val_str}</div>'
+
                     # Create a card-like container
                     card_html = f"""
                     <div style="
-                        border: 1px solid #e0e0e0;
+                        border: 1px solid rgba(128, 128, 128, 0.2);
                         border-radius: 8px;
                         padding: 10px;
-                        background-color: rgba(245, 245, 245, 0.2);
+                        background-color: rgba(128, 128, 128, 0.1);
                         text-align: center;
                         margin-bottom: 10px;
                     ">
                         <div style="
-                            color: #555; 
+                            opacity: 0.8;
                             font-size: 0.9rem; 
                             margin-bottom: 8px; 
                             padding-bottom: 5px; 
                             font-weight: 500; 
-                            border-bottom: 1px solid #ddd;
+                            border-bottom: 1px solid rgba(128, 128, 128, 0.2);
                         ">{label}</div>
                         <!-- Primary -->
-                        <div style="color:{p_col}; font-size:2.2rem; line-height:1.2;">{p_val_str}</div>
+                        <div style="color:{p_col}; font-size:1.8rem; line-height:1.2; font-weight:bold;">{p_val_str}</div>
                         <!-- Comparison -->
-                        <div style="color:{c_col}; font-size:2.2rem; line-height:1.2; margin-top: 5px;">{c_val_str if stats_comp else '<span style="color:#ccc; font-size:1.5rem;">-</span>'}</div>
+                        {comp_html}
                     </div>
                     """
                     st.markdown(card_html, unsafe_allow_html=True)
 
             
 
-
             # --- Top 5 Peaks Display ---
             st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("<div style='color:black; font-size:2.0rem; margin-bottom:10px;'>Dominant Frequencies</div>", unsafe_allow_html=True)
+            st.markdown("### Dominant Frequencies")
             
             def get_top_peaks(vals, freqs):
                 vals_np = np.array(vals)
@@ -1841,7 +1845,8 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             p_peaks = get_top_peaks(fft_values, frequencies)
             c_peaks = get_top_peaks(comp_fft_values, frequencies) if comp_fft_values else []
 
-            pk_cols = st.columns(5)
+            with st.columns([0.75, 0.25])[0]:
+                pk_cols = st.columns(5)
             for i, col in enumerate(pk_cols):
                 with col:
                     # Prepare content
@@ -1864,29 +1869,31 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     elif i == 0 and not stats_comp: # Only show dash for first if no comp, or handled by logic below
                          pass
 
+                    comp_pk_html = ""
+                    if stats_comp:
+                         comp_pk_html = f'<div style="color:{c_col}; font-size:1.6rem; line-height:1.2; margin-top: 5px; font-weight:bold;">{c_content}</div>'
+
                     # Build Card
                     card_html = f"""
                     <div style="
-                        border: 1px solid #e0e0e0;
+                        border: 1px solid rgba(128, 128, 128, 0.2);
                         border-radius: 8px;
                         padding: 10px;
-                        background-color: rgba(245, 245, 245, 0.2);
+                        background-color: rgba(128, 128, 128, 0.1);
                         text-align: center;
                     ">
                         <div style="
-                            color: #555; 
+                            opacity: 0.8;
                             font-size: 0.9rem; 
                             margin-bottom: 8px; 
                             padding-bottom: 5px;
                             font-weight: 500; 
-                            border-bottom: 1px solid #ddd;
+                            border-bottom: 1px solid rgba(128, 128, 128, 0.2);
                         ">{peak_label}</div>
                         <!-- Primary -->
-                        <div style="color:{p_col}; font-size:1.6rem; line-height:1.2;">{p_content}</div>
+                        <div style="color:{p_col}; font-size:1.6rem; line-height:1.2; font-weight:bold;">{p_content}</div>
                         <!-- Comparison -->
-                        <div style="color:{c_col}; font-size:1.6rem; line-height:1.2; margin-top: 5px;">
-                            {c_content if stats_comp else '<span style="color:#ccc; font-size:1.5rem; display:none;">-</span>'}
-                        </div>
+                        {comp_pk_html}
                     </div>
                     """
                     st.markdown(card_html, unsafe_allow_html=True)
