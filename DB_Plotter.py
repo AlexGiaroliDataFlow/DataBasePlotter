@@ -3177,13 +3177,18 @@ def main():
     folder_success_placeholder = None
 
     if available_dbs:
+        # Add a None option to prevent auto-loading the first database
+        db_options = ["(None)"] + available_dbs
+        
         selected_db = st.sidebar.selectbox(
             "Select a database:",
-            options=available_dbs,
+            options=db_options,
             help="Select a database from the Database folder"
         )
-        db_path = db_folder / selected_db
-        folder_success_placeholder = st.sidebar.empty()
+        
+        if selected_db and selected_db != "(None)":
+            db_path = db_folder / selected_db
+            folder_success_placeholder = st.sidebar.empty()
     else:
         st.sidebar.info("No databases found in the default folder.")
     
