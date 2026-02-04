@@ -1465,8 +1465,12 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
     # Default is fft_num_points (from selected row), max is len(fft_cols)
     max_freq_available = len(fft_cols)
 
-    # Key must be dynamic based on selected index AND DB to force reset when context changes
-    dynamic_key_freq = f"fft_freq_to_plot_{primary_db_name}_{current_selected_idx}"
+    # Key is global so it persists across different databases (Global Memory)
+    dynamic_key_freq = "fft_freq_to_plot_global"
+
+    # Auto-adjust stored value if it exceeds current DB limits (e.g. switching from 1000Hz DB to 500Hz DB)
+    if dynamic_key_freq in st.session_state and st.session_state[dynamic_key_freq] > max_freq_available:
+        st.session_state[dynamic_key_freq] = max_freq_available
 
     user_freq_to_plot = st.number_input(
         "Frequencies to Plot (Hz)",
@@ -3512,7 +3516,7 @@ def main():
             plot_fft_data(
                 df_fft, show_quality, show_mqtt_calc, mqtt_stats,
                 df_comparison=df_fft_comp,
-                primary_db_name=primary_db_name if enable_comparison and comp_conn else "",
+                primary_db_name=primary_db_name,
                 comparison_db_name=comp_db_name if enable_comparison and comp_conn else ""
             )
         else:
