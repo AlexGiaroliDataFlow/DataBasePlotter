@@ -1793,7 +1793,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     
                     comp_html = ""
                     if stats_comp:
-                         comp_html = f'<div style="color:{c_col}; font-size:1.8rem; line-height:1.2; margin-top: 5px; font-weight:bold;">{c_val_str}</div>'
+                         comp_html = f'<div style="color:{c_col}; font-size:1.8rem; line-height:1.2; margin-top: 5px;">{c_val_str}</div>'
 
                     # Create a card-like container
                     card_html = f"""
@@ -1814,7 +1814,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                             border-bottom: 1px solid rgba(128, 128, 128, 0.2);
                         ">{label}</div>
                         <!-- Primary -->
-                        <div style="color:{p_col}; font-size:1.8rem; line-height:1.2; font-weight:bold;">{p_val_str}</div>
+                        <div style="color:{p_col}; font-size:1.8rem; line-height:1.2;">{p_val_str}</div>
                         <!-- Comparison -->
                         {comp_html}
                     </div>
@@ -1871,7 +1871,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
 
                     comp_pk_html = ""
                     if stats_comp:
-                         comp_pk_html = f'<div style="color:{c_col}; font-size:1.6rem; line-height:1.2; margin-top: 5px; font-weight:bold;">{c_content}</div>'
+                         comp_pk_html = f'<div style="color:{c_col}; font-size:1.6rem; line-height:1.2; margin-top: 5px;">{c_content}</div>'
 
                     # Build Card
                     card_html = f"""
@@ -1891,7 +1891,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                             border-bottom: 1px solid rgba(128, 128, 128, 0.2);
                         ">{peak_label}</div>
                         <!-- Primary -->
-                        <div style="color:{p_col}; font-size:1.6rem; line-height:1.2; font-weight:bold;">{p_content}</div>
+                        <div style="color:{p_col}; font-size:1.6rem; line-height:1.2;">{p_content}</div>
                         <!-- Comparison -->
                         {comp_pk_html}
                     </div>
