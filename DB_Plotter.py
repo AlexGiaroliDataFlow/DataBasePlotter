@@ -474,6 +474,259 @@ def check_table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     return cursor.fetchone() is not None
 
 
+def detect_db_format(conn: sqlite3.Connection) -> str:
+    """Detect database format. Returns 'new' if flowsense table exists, else 'old'."""
+    return 'new' if check_table_exists(conn, 'flowsense') else 'old'
+
+
+def _iso_to_human_timestamp(iso_str: str) -> str:
+    """Convert ISO 8601 timestamp to human_timestamp format used by old DB."""
+    try:
+        dt = pd.to_datetime(iso_str)
+        # Format without timezone first
+        base_str = dt.strftime('%d/%m/%Y - %H:%M:%S')
+        
+        # Check if timezone info exists and append it
+        if dt.tzinfo is not None:
+            # Get offset string like +0000
+            offset = dt.strftime('%z')
+            # Add colon to match ISO 8601 extended format (e.g. +00:00)
+            if len(offset) == 5:
+                offset = f"{offset[:3]}:{offset[3:]}"
+            return f"{base_str} {offset}"
+            
+        return base_str
+    except:
+        return str(iso_str)
+
+
+def _add_datetime_from_iso(df: pd.DataFrame, time_col: str = 'time') -> pd.DataFrame:
+    """Add human_timestamp and datetime columns from an ISO 8601 time column."""
+    if time_col in df.columns:
+        df['human_timestamp'] = df[time_col].apply(_iso_to_human_timestamp)
+        df['datetime'] = pd.to_datetime(df[time_col], utc=True, errors='coerce')
+        # Convert to timezone-naive for compatibility with old format
+        if df['datetime'].dt.tz is not None:
+            df['datetime'] = df['datetime'].dt.tz_localize(None)
+    return df
+
+
+def convert_flowsense_to_sensor_data(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Convert new-format 'flowsense' table to old-format 'sensor_data' DataFrame."""
+    if not check_table_exists(conn, 'flowsense'):
+        return pd.DataFrame()
+    try:
+        df = pd.read_sql_query("SELECT * FROM flowsense", conn)
+        if df.empty:
+            return pd.DataFrame()
+        
+        df = _add_datetime_from_iso(df, 'time')
+        
+        # Rename columns to match old sensor_data format
+        rename_map = {
+            'ptc': 'PTC',
+            'spare_digital': 'spare',
+        }
+        df = df.rename(columns=rename_map)
+        
+        # Keep only sensor-related columns (exclude tilt)
+        sensor_cols = ['human_timestamp', 'datetime', 'klixon', 'PTC', 'spare',
+                       'temp_pt100_1', 'temp_pt100_2', 'pressure', 'oil_resistance']
+        available = [c for c in sensor_cols if c in df.columns]
+        return df[available].copy()
+    except Exception as e:
+        st.error(f"Error converting flowsense to sensor_data: {e}")
+        return pd.DataFrame()
+
+
+def convert_flowsense_to_tilt_data(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Convert new-format 'flowsense' table to old-format 'tilt_data' DataFrame."""
+    if not check_table_exists(conn, 'flowsense'):
+        return pd.DataFrame()
+    try:
+        df = pd.read_sql_query("SELECT * FROM flowsense", conn)
+        if df.empty:
+            return pd.DataFrame()
+        
+        df = _add_datetime_from_iso(df, 'time')
+        
+        # Keep only tilt-related columns
+        tilt_cols = ['human_timestamp', 'datetime', 'tilt_angle', 'tilt_alarm']
+        available = [c for c in tilt_cols if c in df.columns]
+        return df[available].copy()
+    except Exception as e:
+        st.error(f"Error converting flowsense to tilt_data: {e}")
+        return pd.DataFrame()
+
+
+def convert_new_power_analyzer(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Convert new-format 'power_analyzer' table to old-format 'power_analyzer_data' DataFrame."""
+    if not check_table_exists(conn, 'power_analyzer'):
+        return pd.DataFrame()
+    try:
+        df = pd.read_sql_query("SELECT * FROM power_analyzer", conn)
+        if df.empty:
+            return pd.DataFrame()
+        
+        df = _add_datetime_from_iso(df, 'time')
+        
+        # Rename lowercase columns to match old format uppercase names
+        rename_map = {
+            'v12': 'V12', 'v23': 'V23', 'v31': 'V31', 'vsys': 'Vsys',
+            'a1': 'A1', 'a2': 'A2', 'a3': 'A3', 'asys': 'Asys',
+            'psys': 'Psys', 'qsys': 'Qsys', 'ssys': 'Ssys',
+            'pf_sys': 'TPFsys',
+            'wh': 'Wh',
+            'thd_v1': 'THD_A1V', 'thd_v2': 'THD_A2V', 'thd_v3': 'THD_A3V',
+            'thd_a1': 'THD_A1N', 'thd_a2': 'THD_A2N', 'thd_a3': 'THD_A3N',
+        }
+        df = df.rename(columns=rename_map)
+        return df
+    except Exception as e:
+        st.error(f"Error converting power_analyzer: {e}")
+        return pd.DataFrame()
+
+
+def convert_vibrations_to_fft_data(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Convert new-format 'vibrations' table to old-format 'fft_data' DataFrame."""
+    if not check_table_exists(conn, 'vibrations'):
+        return pd.DataFrame()
+    try:
+        df = pd.read_sql_query("SELECT * FROM vibrations", conn)
+        if df.empty:
+            return pd.DataFrame()
+        
+        rows = []
+        for _, row in df.iterrows():
+            new_row = {}
+            
+            # Convert timestamp
+            ts = row.get('timestamp', '')
+            new_row['human_timestamp'] = _iso_to_human_timestamp(ts)
+            
+            # Map fields
+            new_row['type'] = row.get('type', 'N/A')
+            axis_val = row.get('axis', 'N/A')
+            new_row['axis'] = axis_val.upper() if isinstance(axis_val, str) else axis_val
+            new_row['number_of_points'] = row.get('points', 0)
+            new_row['max_amplitude_g'] = row.get('sensitivity', 0)
+            
+            # Generate human_interval_of_analysis from timestamp
+            new_row['human_interval_of_analysis'] = _iso_to_human_timestamp(ts)
+            
+            # Parse JSON amplitudes and expand to p_0, p_1, ... p_N
+            amplitudes_str = row.get('amplitudes', '[]')
+            try:
+                amplitudes = json.loads(amplitudes_str) if isinstance(amplitudes_str, str) else amplitudes_str
+            except (json.JSONDecodeError, TypeError):
+                amplitudes = []
+            
+            for i, amp in enumerate(amplitudes):
+                new_row[f'p_{i}'] = amp
+            
+            rows.append(new_row)
+        
+        result_df = pd.DataFrame(rows)
+        
+        # Add datetime column
+        if 'timestamp' in df.columns:
+            result_df['datetime'] = pd.to_datetime(df['timestamp'].values, utc=True, errors='coerce')
+            if result_df['datetime'].dt.tz is not None:
+                result_df['datetime'] = result_df['datetime'].dt.tz_localize(None)
+        
+        return result_df
+    except Exception as e:
+        st.error(f"Error converting vibrations to fft_data: {e}")
+        return pd.DataFrame()
+
+
+def convert_harmonics_to_tables(conn: sqlite3.Connection) -> dict:
+    """
+    Convert new-format 'harmonics' table to old-format harmonic table DataFrames.
+    Returns dict like {'V_harmonic_L1': df, 'V_harmonic_L2': df, ..., 'I_harmonic_L1': df, ...}
+    """
+    if not check_table_exists(conn, 'harmonics'):
+        return {}
+    try:
+        df = pd.read_sql_query("SELECT * FROM harmonics", conn)
+        if df.empty:
+            return {}
+        
+        result = {}
+        # Map new format type/pole to old format table names
+        type_map = {'VOL': 'V', 'CUR': 'I'}
+        pole_map = {'1': 'L1', '2': 'L2', '3': 'L3'}
+        
+        for new_type, old_prefix in type_map.items():
+            for new_pole, old_pole in pole_map.items():
+                table_name = f"{old_prefix}_harmonic_{old_pole}"
+                col_prefix = f"{old_prefix}_{old_pole}"
+                
+                # Filter rows for this type/pole combination
+                mask = (df['type'] == new_type) & (df['pole'].astype(str) == new_pole)
+                subset = df[mask].copy()
+                
+                if subset.empty:
+                    continue
+                
+                rows = []
+                for _, row in subset.iterrows():
+                    new_row = {}
+                    
+                    # Convert timestamp
+                    ts = row.get('timestamp', '')
+                    new_row['human_timestamp'] = _iso_to_human_timestamp(ts)
+                    
+                    # Parse JSON amplitudes
+                    amplitudes_str = row.get('amplitudes', '[]')
+                    try:
+                        amplitudes = json.loads(amplitudes_str) if isinstance(amplitudes_str, str) else amplitudes_str
+                    except (json.JSONDecodeError, TypeError):
+                        amplitudes = []
+                    
+                    # The new format has 55 values:
+                    # First 3 are fundamentals (3 phases in one reading), then harmonics
+                    # Actually looking at sample data, it's 55 values total
+                    # Map: first value -> fundamental (_f), then _2 through _55
+                    if len(amplitudes) >= 1:
+                        new_row[f'{col_prefix}_f'] = amplitudes[0]
+                    for i in range(1, len(amplitudes)):
+                        new_row[f'{col_prefix}_{i+1}'] = amplitudes[i]
+                    
+                    rows.append(new_row)
+                
+                result_df = pd.DataFrame(rows)
+                
+                # Add datetime
+                ts_values = subset['timestamp'].values
+                result_df['datetime'] = pd.to_datetime(ts_values, utc=True, errors='coerce')
+                if result_df['datetime'].dt.tz is not None:
+                    result_df['datetime'] = result_df['datetime'].dt.tz_localize(None)
+                
+                result[table_name] = result_df
+        
+        return result
+    except Exception as e:
+        st.error(f"Error converting harmonics: {e}")
+        return {}
+
+
+def convert_new_gps(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Convert new-format 'gps' table to old-format 'gps_data' DataFrame."""
+    if not check_table_exists(conn, 'gps'):
+        return pd.DataFrame()
+    try:
+        df = pd.read_sql_query("SELECT * FROM gps", conn)
+        if df.empty:
+            return pd.DataFrame()
+        
+        df = _add_datetime_from_iso(df, 'time')
+        return df
+    except Exception as e:
+        st.error(f"Error converting gps: {e}")
+        return pd.DataFrame()
+
+
 def get_empty_columns(df: pd.DataFrame, exclude_cols: list = None) -> list:
     """Identify columns that are present but contain no data."""
     if df.empty:
@@ -593,6 +846,9 @@ def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool 
             comp_suffix = f" [{comparison_label}]" if comparison_label else " [Comp]"
             
             # Trace 1: Raw Data (Primary)
+            custom_data_primary = df_filtered['human_timestamp'] if 'human_timestamp' in df_filtered.columns else None
+            hovertemplate_primary = f'{col}{primary_suffix}: %{{y}}<br>Time: %{{customdata}}<extra></extra>' if custom_data_primary is not None else f'{col}{primary_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+
             fig.add_trace(go.Scatter(
                 x=df_filtered[x_axis],
                 y=df_filtered[col],
@@ -600,7 +856,8 @@ def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool 
                 name=f'{col}{primary_suffix}',
                 line=dict(color=line_color, width=1),
                 opacity=0.7,
-                hovertemplate=f'{col}{primary_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                customdata=custom_data_primary,
+                hovertemplate=hovertemplate_primary
             ))
             
             # Calculate Moving Average (Primary)
@@ -608,13 +865,16 @@ def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool 
             col_avg = df_filtered[col].rolling(window=window_size, center=True).mean()
             
             # Trace 2: Average (Primary)
+            hovertemplate_avg = f'{col} Avg{primary_suffix}: %{{y}}<br>Time: %{{customdata}}<extra></extra>' if custom_data_primary is not None else f'{col} Avg{primary_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+            
             fig.add_trace(go.Scatter(
                 x=df_filtered[x_axis],
                 y=col_avg,
                 mode='lines',
                 name=f'{col} Avg{primary_suffix}',
                 line=dict(color=line_color, width=2.5),
-                hovertemplate=f'{col} Avg{primary_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                customdata=custom_data_primary,
+                hovertemplate=hovertemplate_avg
             ))
             
             # Comparison DB traces (aligned timestamps, solid lines)
@@ -626,13 +886,17 @@ def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool 
                 
                 if not comp_col_data.isna().all():
                     # Trace 3: Raw Data (Comparison) - dashed line for clear distinction
+                    custom_data_comp = df_comp_aligned['human_timestamp'] if 'human_timestamp' in df_comp_aligned.columns else None
+                    hovertemplate_comp = f'{col}{comp_suffix}: %{{y}}<br>Time: %{{customdata}}<extra></extra>' if custom_data_comp is not None else f'{col}{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+
                     fig.add_trace(go.Scatter(
                         x=df_comp_aligned[x_axis],
                         y=comp_col_data,
                         mode='lines',
                         name=f'{col}{comp_suffix}',
                         line=dict(color=comp_color, width=1.5, dash='dot'),
-                        hovertemplate=f'{col}{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                        customdata=custom_data_comp,
+                        hovertemplate=hovertemplate_comp
                     ))
                     
                     # Calculate Moving Average (Comparison)
@@ -640,13 +904,16 @@ def plot_sensor_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool 
                     col_avg_c = comp_col_data.rolling(window=window_size_c, center=True).mean()
                     
                     # Trace 4: Average (Comparison) - dashed line for clear distinction
+                    hovertemplate_avg_comp = f'{col} Avg{comp_suffix}: %{{y}}<br>Time: %{{customdata}}<extra></extra>' if custom_data_comp is not None else f'{col} Avg{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+
                     fig.add_trace(go.Scatter(
                         x=df_comp_aligned[x_axis],
                         y=col_avg_c,
                         mode='lines',
                         name=f'{col} Avg{comp_suffix}',
                         line=dict(color=comp_color, width=2.5, dash='dot'),
-                        hovertemplate=f'{col} Avg{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                        customdata=custom_data_comp,
+                        hovertemplate=hovertemplate_avg_comp
                     ))
             
             fig.update_layout(
@@ -879,6 +1146,9 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
             fig = go.Figure()
 
             # Trace 1: Raw (Primary)
+            custom_data_primary = df_filtered['human_timestamp'] if 'human_timestamp' in df_filtered.columns else None
+            hovertemplate_primary = f'{display_name}{primary_suffix}: %{{y}}<br>Time: %{{customdata}}<extra></extra>' if custom_data_primary is not None else f'{display_name}{primary_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+
             fig.add_trace(go.Scatter(
                 x=df_filtered[x_axis],
                 y=df_filtered[col],
@@ -886,7 +1156,8 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
                 name=f'{display_name}{primary_suffix}',
                 line=dict(color=line_color, width=1),
                 opacity=0.7,
-                hovertemplate=f'{display_name}{primary_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                customdata=custom_data_primary,
+                hovertemplate=hovertemplate_primary
             ))
             
             # Calculate Moving Average (Primary)
@@ -894,13 +1165,16 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
             col_avg = df_filtered[col].rolling(window=window_size, center=True).mean()
             
             # Trace 2: Average (Primary)
+            hovertemplate_avg = f'{display_name} Avg{primary_suffix}: %{{y}}<br>Time: %{{customdata}}<extra></extra>' if custom_data_primary is not None else f'{display_name} Avg{primary_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+
             fig.add_trace(go.Scatter(
                 x=df_filtered[x_axis],
                 y=col_avg,
                 mode='lines',
                 name=f'{display_name} Avg{primary_suffix}',
                 line=dict(color=line_color, width=2.5),
-                hovertemplate=f'{display_name} Avg{primary_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                customdata=custom_data_primary,
+                hovertemplate=hovertemplate_avg
             ))
             
             # Comparison DB traces (if available)
@@ -911,13 +1185,17 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
                 
                 if not comp_col_data.isna().all():
                     # Trace 3: Raw (Comparison) - dashed for clear distinction
+                    custom_data_comp = df_comp_aligned['human_timestamp'] if 'human_timestamp' in df_comp_aligned.columns else None
+                    hovertemplate_comp = f'{display_name}{comp_suffix}: %{{y}}<br>Time: %{{customdata}}<extra></extra>' if custom_data_comp is not None else f'{display_name}{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+
                     fig.add_trace(go.Scatter(
                         x=df_comp_aligned[x_axis],
                         y=comp_col_data,
                         mode='lines',
                         name=f'{display_name}{comp_suffix}',
                         line=dict(color=comp_color, width=1.5, dash='dot'),
-                        hovertemplate=f'{display_name}{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                        customdata=custom_data_comp,
+                        hovertemplate=hovertemplate_comp
                     ))
                     
                     # Calculate Moving Average (Comparison)
@@ -925,13 +1203,16 @@ def plot_power_analyzer_data(df: pd.DataFrame, show_quality: bool = True, show_m
                     col_avg_c = comp_col_data.rolling(window=window_size_c, center=True).mean()
                     
                     # Trace 4: Average (Comparison) - dashed for clear distinction
+                    hovertemplate_avg_comp = f'{display_name} Avg{comp_suffix}: %{{y}}<br>Time: %{{customdata}}<extra></extra>' if custom_data_comp is not None else f'{display_name} Avg{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+
                     fig.add_trace(go.Scatter(
                         x=df_comp_aligned[x_axis],
                         y=col_avg_c,
                         mode='lines',
                         name=f'{display_name} Avg{comp_suffix}',
                         line=dict(color=comp_color, width=2.5, dash='dot'),
-                        hovertemplate=f'{display_name} Avg{comp_suffix}: %{{y}}<br>{x_axis}: %{{x}}<extra></extra>'
+                        customdata=custom_data_comp,
+                        hovertemplate=hovertemplate_avg_comp
                     ))
             
             fig.update_layout(
@@ -1176,6 +1457,9 @@ def plot_tilt_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = 
         fig = go.Figure()
         
         # Trace 1: Raw Data (Primary)
+        custom_data_primary = df_filtered['human_timestamp'] if 'human_timestamp' in df_filtered.columns else None
+        hovertemplate_primary = f'Tilt Angle{primary_suffix}: %{{y:.2f}} deg<br>Time: %{{customdata}}<extra></extra>' if custom_data_primary is not None else f'Tilt Angle{primary_suffix}: %{{y:.2f}} deg<br>Time: %{{x}}<extra></extra>'
+
         fig.add_trace(go.Scatter(
             x=df_filtered[x_axis],
             y=df_filtered['tilt_angle'],
@@ -1183,17 +1467,21 @@ def plot_tilt_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = 
             name=f'Tilt Angle{primary_suffix}',
             line=dict(color=tilt_color, width=1),
             opacity=0.5,
-            hovertemplate=f'Tilt Angle{primary_suffix}: %{{y:.2f}} deg<br>Time: %{{x}}<extra></extra>'
+            customdata=custom_data_primary,
+            hovertemplate=hovertemplate_primary
         ))
         
         # Trace 2: Average (Primary)
+        hovertemplate_avg = f'Tilt Angle Avg{primary_suffix}: %{{y:.2f}} deg<br>Time: %{{customdata}}<extra></extra>' if custom_data_primary is not None else f'Tilt Angle Avg{primary_suffix}: %{{y:.2f}} deg<br>Time: %{{x}}<extra></extra>'
+
         fig.add_trace(go.Scatter(
             x=df_filtered[x_axis],
             y=df_filtered['tilt_angle_avg'],
             mode='lines',
             name=f'Tilt Angle Avg{primary_suffix}',
             line=dict(color=tilt_color, width=3),
-            hovertemplate=f'Tilt Angle Avg{primary_suffix}: %{{y:.2f}} deg<br>Time: %{{x}}<extra></extra>'
+            customdata=custom_data_primary,
+            hovertemplate=hovertemplate_avg
         ))
         
         # Comparison traces
@@ -1203,23 +1491,30 @@ def plot_tilt_data(df_filtered: pd.DataFrame, x_axis: str, show_quality: bool = 
             df_comp_aligned['tilt_angle_avg'] = df_comp_aligned['tilt_angle'].rolling(window=window_size_c, center=True).mean()
             
             # Trace 3: Raw Data (Comparison) - dashed for clear distinction
+            custom_data_comp = df_comp_aligned['human_timestamp'] if 'human_timestamp' in df_comp_aligned.columns else None
+            hovertemplate_comp = f'Tilt Angle{comp_suffix}: %{{y:.2f}} deg<br>Time: %{{customdata}}<extra></extra>' if custom_data_comp is not None else f'Tilt Angle{comp_suffix}: %{{y:.2f}} deg<br>Time: %{{x}}<extra></extra>'
+
             fig.add_trace(go.Scatter(
                 x=df_comp_aligned[x_axis],
                 y=df_comp_aligned['tilt_angle'],
                 mode='lines',
                 name=f'Tilt Angle{comp_suffix}',
                 line=dict(color=comp_tilt_color, width=1.5, dash='dot'),
-                hovertemplate=f'Tilt Angle{comp_suffix}: %{{y:.2f}} deg<br>Time: %{{x}}<extra></extra>'
+                customdata=custom_data_comp,
+                hovertemplate=hovertemplate_comp
             ))
             
             # Trace 4: Average (Comparison) - dashed for clear distinction
+            hovertemplate_avg_comp = f'Tilt Angle Avg{comp_suffix}: %{{y:.2f}} deg<br>Time: %{{customdata}}<extra></extra>' if custom_data_comp is not None else f'Tilt Angle Avg{comp_suffix}: %{{y:.2f}} deg<br>Time: %{{x}}<extra></extra>'
+
             fig.add_trace(go.Scatter(
                 x=df_comp_aligned[x_axis],
                 y=df_comp_aligned['tilt_angle_avg'],
                 mode='lines',
                 name=f'Tilt Angle Avg{comp_suffix}',
                 line=dict(color=comp_tilt_color, width=3, dash='dash'),
-                hovertemplate=f'Tilt Angle Avg{comp_suffix}: %{{y:.2f}} deg<br>Time: %{{x}}<extra></extra>'
+                customdata=custom_data_comp,
+                hovertemplate=hovertemplate_avg_comp
             ))
 
         fig.update_layout(
@@ -2510,25 +2805,45 @@ def plot_comparison_data(conn: sqlite3.Connection, comp_conn: sqlite3.Connection
     c_prefix = f"{comparison_label} - " if comp_conn else ""
 
     # Load and process PRIMARY data
-    if check_table_exists(conn, 'sensor_data'):
-        process_columns("Sensor", 'sensor_data', get_table_data(conn, 'sensor_data'), p_prefix)
-        
-    if check_table_exists(conn, 'power_analyzer_data'):
-        process_columns("Power", 'power_analyzer_data', get_table_data(conn, 'power_analyzer_data'), p_prefix)
-            
-    if check_table_exists(conn, 'tilt_data'):
-        process_columns("Tilt", 'tilt_data', get_table_data(conn, 'tilt_data'), p_prefix)
+    primary_format = detect_db_format(conn)
+    if primary_format == 'new':
+        df_sensor = convert_flowsense_to_sensor_data(conn)
+        if not df_sensor.empty:
+            process_columns("Sensor", 'sensor_data', df_sensor, p_prefix)
+        df_power = convert_new_power_analyzer(conn)
+        if not df_power.empty:
+            process_columns("Power", 'power_analyzer_data', df_power, p_prefix)
+        df_tilt = convert_flowsense_to_tilt_data(conn)
+        if not df_tilt.empty:
+            process_columns("Tilt", 'tilt_data', df_tilt, p_prefix)
+    else:
+        if check_table_exists(conn, 'sensor_data'):
+            process_columns("Sensor", 'sensor_data', get_table_data(conn, 'sensor_data'), p_prefix)
+        if check_table_exists(conn, 'power_analyzer_data'):
+            process_columns("Power", 'power_analyzer_data', get_table_data(conn, 'power_analyzer_data'), p_prefix)
+        if check_table_exists(conn, 'tilt_data'):
+            process_columns("Tilt", 'tilt_data', get_table_data(conn, 'tilt_data'), p_prefix)
     
     # Load and process COMPARISON data
     if comp_conn:
-        if check_table_exists(comp_conn, 'sensor_data'):
-            process_columns("Sensor", 'sensor_data', get_table_data(comp_conn, 'sensor_data'), c_prefix)
-            
-        if check_table_exists(comp_conn, 'power_analyzer_data'):
-            process_columns("Power", 'power_analyzer_data', get_table_data(comp_conn, 'power_analyzer_data'), c_prefix)
-                
-        if check_table_exists(comp_conn, 'tilt_data'):
-            process_columns("Tilt", 'tilt_data', get_table_data(comp_conn, 'tilt_data'), c_prefix)
+        comp_format = detect_db_format(comp_conn)
+        if comp_format == 'new':
+            df_sensor_c = convert_flowsense_to_sensor_data(comp_conn)
+            if not df_sensor_c.empty:
+                process_columns("Sensor", 'sensor_data', df_sensor_c, c_prefix)
+            df_power_c = convert_new_power_analyzer(comp_conn)
+            if not df_power_c.empty:
+                process_columns("Power", 'power_analyzer_data', df_power_c, c_prefix)
+            df_tilt_c = convert_flowsense_to_tilt_data(comp_conn)
+            if not df_tilt_c.empty:
+                process_columns("Tilt", 'tilt_data', df_tilt_c, c_prefix)
+        else:
+            if check_table_exists(comp_conn, 'sensor_data'):
+                process_columns("Sensor", 'sensor_data', get_table_data(comp_conn, 'sensor_data'), c_prefix)
+            if check_table_exists(comp_conn, 'power_analyzer_data'):
+                process_columns("Power", 'power_analyzer_data', get_table_data(comp_conn, 'power_analyzer_data'), c_prefix)
+            if check_table_exists(comp_conn, 'tilt_data'):
+                process_columns("Tilt", 'tilt_data', get_table_data(comp_conn, 'tilt_data'), c_prefix)
     
     if not available_data:
         st.warning("No time series data available for comparison.")
@@ -2819,7 +3134,7 @@ def plot_comparison_data(conn: sqlite3.Connection, comp_conn: sqlite3.Connection
 
 
 
-def plot_harmonics_data(conn: sqlite3.Connection, available_tables: list, show_quality: bool = True):
+def plot_harmonics_data(conn: sqlite3.Connection, available_tables: list, show_quality: bool = True, converted_data: dict = None):
     """Create interactive bar charts for harmonics data (Voltage and Current harmonics)."""
     
     st.subheader("Harmonics Analysis")
@@ -2839,7 +3154,18 @@ def plot_harmonics_data(conn: sqlite3.Connection, available_tables: list, show_q
     harm_tab1, harm_tab2 = st.tabs(["Voltage Harmonics", "Current Harmonics"])
     
     def get_harmonics_df(table_name: str) -> pd.DataFrame:
-        """Load harmonics data from a table."""
+        """Load harmonics data from a table (or use pre-converted data)."""
+        # Use pre-converted data if available (new format)
+        if converted_data and table_name in converted_data:
+            df = converted_data[table_name].copy()
+            if 'human_timestamp' in df.columns and 'datetime' not in df.columns:
+                try:
+                    df['datetime'] = pd.to_datetime(df['human_timestamp'], format='%d/%m/%Y - %H:%M:%S', errors='coerce')
+                except:
+                    pass
+            return df
+        
+        # Old format: read from database
         df = get_table_data(conn, table_name)
         # Convert datetime if present
         if 'human_timestamp' in df.columns:
@@ -2848,6 +3174,7 @@ def plot_harmonics_data(conn: sqlite3.Connection, available_tables: list, show_q
             except:
                 pass
         return df
+
     
     def get_harmonic_columns(df: pd.DataFrame, prefix: str) -> list:
         """Get harmonics columns in order (fundamental, 2nd, 3rd, ..., 55th)."""
@@ -3410,6 +3737,19 @@ def main():
         st.error(f"Failed to connect to database: {e}")
         return
     
+    # Detect database format
+    db_format = detect_db_format(conn)
+    
+    # Detect comparison database format if available
+    comp_db_format = None
+    if enable_comparison and comp_conn:
+        comp_db_format = detect_db_format(comp_conn)
+    
+    # Pre-convert new-format harmonics data (needed for Tab 5)
+    harmonics_converted = {}
+    if db_format == 'new':
+        harmonics_converted = convert_harmonics_to_tables(conn)
+    
     # Initialize variables for usage in tabs before the sidebar toggles are defined at the end
     show_quality = st.session_state.get("show_quality_toggle", False)
     show_mqtt_calc = st.session_state.get("show_mqtt_calc_toggle", False)
@@ -3446,17 +3786,25 @@ def main():
         cols_tilt_res = []
 
         # Load both first to determine common range
-        df_sensors_raw = get_table_data(conn, 'sensor_data') if check_table_exists(conn, 'sensor_data') else pd.DataFrame()
-        df_tilt_raw = get_table_data(conn, 'tilt_data') if check_table_exists(conn, 'tilt_data') else pd.DataFrame()
+        if db_format == 'new':
+            df_sensors_raw = convert_flowsense_to_sensor_data(conn)
+            df_tilt_raw = convert_flowsense_to_tilt_data(conn)
+        else:
+            df_sensors_raw = get_table_data(conn, 'sensor_data') if check_table_exists(conn, 'sensor_data') else pd.DataFrame()
+            df_tilt_raw = get_table_data(conn, 'tilt_data') if check_table_exists(conn, 'tilt_data') else pd.DataFrame()
         
         # Load comparison data if enabled
         df_sensors_comp = None
         df_tilt_comp = None
         if enable_comparison and comp_conn:
-            if check_table_exists(comp_conn, 'sensor_data'):
-                df_sensors_comp = get_table_data(comp_conn, 'sensor_data')
-            if check_table_exists(comp_conn, 'tilt_data'):
-                df_tilt_comp = get_table_data(comp_conn, 'tilt_data')
+            if comp_db_format == 'new':
+                df_sensors_comp = convert_flowsense_to_sensor_data(comp_conn)
+                df_tilt_comp = convert_flowsense_to_tilt_data(comp_conn)
+            else:
+                if check_table_exists(comp_conn, 'sensor_data'):
+                    df_sensors_comp = get_table_data(comp_conn, 'sensor_data')
+                if check_table_exists(comp_conn, 'tilt_data'):
+                    df_tilt_comp = get_table_data(comp_conn, 'tilt_data')
 
         if not df_sensors_raw.empty:
             # Check for empty sensors
@@ -3514,9 +3862,14 @@ def main():
     
     # Tab 3: Power Analyzer
     with tab3:
-        if check_table_exists(conn, 'power_analyzer_data'):
+        # Load power analyzer data (new or old format)
+        df_power = pd.DataFrame()
+        if db_format == 'new':
+            df_power = convert_new_power_analyzer(conn)
+        elif check_table_exists(conn, 'power_analyzer_data'):
             df_power = get_table_data(conn, 'power_analyzer_data')
-            
+        
+        if not df_power.empty:
             # Check for empty parameters
             empty_power_cols = get_empty_columns(df_power, EXCLUDE_METADATA_COLS)
             if empty_power_cols:
@@ -3525,7 +3878,9 @@ def main():
             # Load comparison power analyzer data if enabled
             df_power_comp = None
             if enable_comparison and comp_conn:
-                if check_table_exists(comp_conn, 'power_analyzer_data'):
+                if comp_db_format == 'new':
+                    df_power_comp = convert_new_power_analyzer(comp_conn)
+                elif check_table_exists(comp_conn, 'power_analyzer_data'):
                     df_power_comp = get_table_data(comp_conn, 'power_analyzer_data')
             
             plot_power_analyzer_data(
@@ -3539,13 +3894,20 @@ def main():
     
     # Tab 4: FFT
     with tab4:
-        if check_table_exists(conn, 'fft_data'):
+        # Load FFT data (new or old format)
+        df_fft = pd.DataFrame()
+        if db_format == 'new':
+            df_fft = convert_vibrations_to_fft_data(conn)
+        elif check_table_exists(conn, 'fft_data'):
             df_fft = get_table_data(conn, 'fft_data')
-            
+        
+        if not df_fft.empty:
             # Load comparison FFT data if enabled
             df_fft_comp = None
             if enable_comparison and comp_conn:
-                if check_table_exists(comp_conn, 'fft_data'):
+                if comp_db_format == 'new':
+                    df_fft_comp = convert_vibrations_to_fft_data(comp_conn)
+                elif check_table_exists(comp_conn, 'fft_data'):
                     df_fft_comp = get_table_data(comp_conn, 'fft_data')
             
             plot_fft_data(
@@ -3559,23 +3921,36 @@ def main():
             
     # Tab 5: Harmonics
     with tab5:
-        # Check for any harmonics tables
+        # Check for any harmonics tables (old format or converted from new)
         harmonics_tables = ['V_harmonic_L1', 'V_harmonic_L2', 'V_harmonic_L3', 
                            'I_harmonic_L1', 'I_harmonic_L2', 'I_harmonic_L3']
-        available_harmonics = [t for t in harmonics_tables if check_table_exists(conn, t)]
         
-        if available_harmonics:
-            plot_harmonics_data(conn, available_harmonics, show_quality)
+        if db_format == 'new' and harmonics_converted:
+            available_harmonics = list(harmonics_converted.keys())
+            if available_harmonics:
+                plot_harmonics_data(conn, available_harmonics, show_quality, harmonics_converted)
+            else:
+                st.warning("No harmonics data tables found in database.")
         else:
-            st.warning("No harmonics data tables found in database.")
+            available_harmonics = [t for t in harmonics_tables if check_table_exists(conn, t)]
+            if available_harmonics:
+                plot_harmonics_data(conn, available_harmonics, show_quality)
+            else:
+                st.warning("No harmonics data tables found in database.")
     
     # Tab 6: GPS
     with tab6:
-        if check_table_exists(conn, 'gps_data'):
+        # Load GPS data (new or old format)
+        df_gps = pd.DataFrame()
+        if db_format == 'new':
+            df_gps = convert_new_gps(conn)
+        elif check_table_exists(conn, 'gps_data'):
             df_gps = get_table_data(conn, 'gps_data')
+        
+        if not df_gps.empty:
             plot_gps_data(df_gps)
         else:
-            st.warning("GPS data table not found in database.")
+            st.info("No GPS data available in database.")
 
     # Analysis Settings at the very bottom of sidebar
     st.sidebar.markdown("---")
