@@ -500,10 +500,39 @@ def _iso_to_human_timestamp(iso_str: str) -> str:
         return str(iso_str)
 
 
+def _fast_iso_to_human(s: pd.Series) -> pd.Series:
+    """Vectorized conversion of ISO 8601 string series to human_timestamp format for performance."""
+    s_str = s.astype(str)
+    
+    # Extract parts using vectorized string slicing
+    y = s_str.str.slice(0, 4)
+    m = s_str.str.slice(5, 7)
+    d = s_str.str.slice(8, 10)
+    time_part = s_str.str.slice(11, 19)
+    tz_part = s_str.str.slice(19)
+    
+    tz_part = tz_part.replace('Z', '+00:00')
+    tz_part = np.where(tz_part != '', ' ' + tz_part, '')
+    tz_part = pd.Series(tz_part, index=s.index).apply(lambda x: x[:4] + ':' + x[4:] if len(x) == 6 and ':' not in x else x)
+    
+    fast_human = d + '/' + m + '/' + y + ' - ' + time_part + tz_part
+    
+    # Fallback for invalid formats
+    valid_format = (s_str.str.len() >= 19) & (s_str.str.slice(10, 11) == 'T')
+    
+    result = pd.Series(index=s.index, dtype=object)
+    result[valid_format] = fast_human[valid_format]
+    
+    if not valid_format.all():
+        result[~valid_format] = s[~valid_format].apply(_iso_to_human_timestamp)
+        
+    return result
+
+
 def _add_datetime_from_iso(df: pd.DataFrame, time_col: str = 'time') -> pd.DataFrame:
     """Add human_timestamp and datetime columns from an ISO 8601 time column."""
     if time_col in df.columns:
-        df['human_timestamp'] = df[time_col].apply(_iso_to_human_timestamp)
+        df['human_timestamp'] = _fast_iso_to_human(df[time_col])
         df['datetime'] = pd.to_datetime(df[time_col], utc=True, errors='coerce')
         # Convert to timezone-naive for compatibility with old format
         if df['datetime'].dt.tz is not None:
@@ -596,13 +625,16 @@ def convert_vibrations_to_fft_data(conn: sqlite3.Connection) -> pd.DataFrame:
         if df.empty:
             return pd.DataFrame()
         
+        # Precompute vectorized human timestamps
+        human_ts = _fast_iso_to_human(df['timestamp']) if 'timestamp' in df.columns else pd.Series([''] * len(df))
+        human_ts_vals = human_ts.values
+        
         rows = []
-        for _, row in df.iterrows():
+        for i, row in enumerate(df.to_dict('records')):
             new_row = {}
             
             # Convert timestamp
-            ts = row.get('timestamp', '')
-            new_row['human_timestamp'] = _iso_to_human_timestamp(ts)
+            new_row['human_timestamp'] = human_ts_vals[i]
             
             # Map fields
             new_row['type'] = row.get('type', 'N/A')
@@ -612,7 +644,7 @@ def convert_vibrations_to_fft_data(conn: sqlite3.Connection) -> pd.DataFrame:
             new_row['max_amplitude_g'] = row.get('sensitivity', 0)
             
             # Generate human_interval_of_analysis from timestamp
-            new_row['human_interval_of_analysis'] = _iso_to_human_timestamp(ts)
+            new_row['human_interval_of_analysis'] = human_ts_vals[i]
             
             # Parse JSON amplitudes and expand to p_0, p_1, ... p_N
             amplitudes_str = row.get('amplitudes', '[]')
@@ -621,8 +653,8 @@ def convert_vibrations_to_fft_data(conn: sqlite3.Connection) -> pd.DataFrame:
             except (json.JSONDecodeError, TypeError):
                 amplitudes = []
             
-            for i, amp in enumerate(amplitudes):
-                new_row[f'p_{i}'] = amp
+            for j, amp in enumerate(amplitudes):
+                new_row[f'p_{j}'] = amp
             
             rows.append(new_row)
         
@@ -669,13 +701,15 @@ def convert_harmonics_to_tables(conn: sqlite3.Connection) -> dict:
                 if subset.empty:
                     continue
                 
+                # Vectorize formatting for subset
+                subset_ts_vals = _fast_iso_to_human(subset['timestamp']).values if 'timestamp' in subset.columns else [''] * len(subset)
+                
                 rows = []
-                for _, row in subset.iterrows():
+                for i, row in enumerate(subset.to_dict('records')):
                     new_row = {}
                     
                     # Convert timestamp
-                    ts = row.get('timestamp', '')
-                    new_row['human_timestamp'] = _iso_to_human_timestamp(ts)
+                    new_row['human_timestamp'] = subset_ts_vals[i]
                     
                     # Parse JSON amplitudes
                     amplitudes_str = row.get('amplitudes', '[]')
@@ -690,18 +724,19 @@ def convert_harmonics_to_tables(conn: sqlite3.Connection) -> dict:
                     # Map: first value -> fundamental (_f), then _2 through _55
                     if len(amplitudes) >= 1:
                         new_row[f'{col_prefix}_f'] = amplitudes[0]
-                    for i in range(1, len(amplitudes)):
-                        new_row[f'{col_prefix}_{i+1}'] = amplitudes[i]
+                    for j in range(1, len(amplitudes)):
+                        new_row[f'{col_prefix}_{j+1}'] = amplitudes[j]
                     
                     rows.append(new_row)
                 
                 result_df = pd.DataFrame(rows)
                 
                 # Add datetime
-                ts_values = subset['timestamp'].values
-                result_df['datetime'] = pd.to_datetime(ts_values, utc=True, errors='coerce')
-                if result_df['datetime'].dt.tz is not None:
-                    result_df['datetime'] = result_df['datetime'].dt.tz_localize(None)
+                if 'timestamp' in subset.columns:
+                    ts_values = subset['timestamp'].values
+                    result_df['datetime'] = pd.to_datetime(ts_values, utc=True, errors='coerce')
+                    if result_df['datetime'].dt.tz is not None:
+                        result_df['datetime'] = result_df['datetime'].dt.tz_localize(None)
                 
                 result[table_name] = result_df
         
