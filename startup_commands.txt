@@ -1,4 +1,4 @@
 # DB Plotter - Startup Commands
 # ==============================
 
-.\venv\Scripts\activate; streamlit run DB_Plotter.py --server.port 9999
+.\venv\Scripts\activate; streamlit run plotter.py --server.port 9999
