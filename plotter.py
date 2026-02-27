@@ -3654,9 +3654,13 @@ def main():
     # Default database folder
     db_folder = DEFAULT_DATABASE_FOLDER
     
-    # Show available databases
+    # Refresh counter to force re-scan of folder
+    if "db_folder_refresh" not in st.session_state:
+        st.session_state["db_folder_refresh"] = 0
+
+    # Show available databases (re-read on every refresh)
     available_dbs = get_database_files(db_folder)
-    
+
     selected_db = None
     db_path = None
     folder_success_placeholder = None
@@ -3664,18 +3668,26 @@ def main():
     if available_dbs:
         # Add a None option to prevent auto-loading the first database
         db_options = ["(None)"] + available_dbs
-        
+
         selected_db = st.sidebar.selectbox(
             "Select a database:",
             options=db_options,
-            help="Select a database from the Database folder"
+            help="Select a database from the Database folder",
+            key=f"db_selector_{st.session_state['db_folder_refresh']}"
         )
-        
+        if st.sidebar.button("\U0001f504 Aggiorna lista", help="Refresh folder", key="refresh_db_folder", use_container_width=True):
+            st.session_state["db_folder_refresh"] += 1
+            st.rerun()
+
         if selected_db and selected_db != "(None)":
             db_path = db_folder / selected_db
             folder_success_placeholder = st.sidebar.empty()
     else:
-        st.sidebar.info("No databases found in the default folder.")
+        # No databases found - still show refresh button
+        st.sidebar.info("No databases found")
+        if st.sidebar.button("Refresh folder", help="Refresh folder", key="refresh_db_folder_empty", use_container_width=True):
+            st.session_state["db_folder_refresh"] += 1
+            st.rerun()
     
     # stats_placeholder removed - breakdown now renders directly in sidebar after toggles
     mqtt_stats = MqttStats() if "show_mqtt_calc" in st.session_state and st.session_state.show_mqtt_calc else None
