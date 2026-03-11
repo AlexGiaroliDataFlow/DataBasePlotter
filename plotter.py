@@ -806,6 +806,76 @@ def get_empty_columns(df: pd.DataFrame, exclude_cols: list = None) -> list:
     return empty_cols
 
 
+def remove_data_gaps(df: pd.DataFrame, gap_threshold_seconds: float, time_col: str = 'datetime') -> pd.DataFrame:
+    """
+    Remove data gaps from a DataFrame.
+    
+    Finds gaps in the time column that are longer than gap_threshold_seconds,
+    and removes rows that fall within those gap regions. The result is a DataFrame
+    where large idle periods are cut out, making the visualization more compact.
+    
+    To ensure plotly doesn't draw lines connecting data across removed gaps,
+    a single NaN-row separator is inserted at each cut point.
+    
+    Args:
+        df: DataFrame with time-series data.
+        gap_threshold_seconds: Minimum gap duration (in seconds) to remove.
+        time_col: Name of the datetime column.
+        
+    Returns:
+        DataFrame with gaps removed.
+    """
+    if df.empty or time_col not in df.columns or df[time_col].isna().all():
+        return df
+    
+    df_sorted = df.sort_values(time_col).reset_index(drop=True)
+    times = df_sorted[time_col].values
+    
+    # Calculate time differences in seconds between consecutive rows
+    time_diffs = np.diff(times).astype('timedelta64[ms]').astype(float) / 1000.0
+    
+    # Find indices where the gap exceeds the threshold
+    gap_indices = np.where(time_diffs > gap_threshold_seconds)[0]
+    
+    if len(gap_indices) == 0:
+        return df_sorted  # No gaps to remove
+    
+    # Build segments of valid data (between gaps)
+    segments = []
+    prev_end = 0
+    
+    for gap_idx in gap_indices:
+        # Segment from prev_end to gap_idx (inclusive)
+        segment = df_sorted.iloc[prev_end:gap_idx + 1].copy()
+        if not segment.empty:
+            segments.append(segment)
+        
+        # Move past the gap - next segment starts at gap_idx + 1
+        prev_end = gap_idx + 1
+    
+    # Last segment (from last gap to end)
+    if prev_end < len(df_sorted):
+        segments.append(df_sorted.iloc[prev_end:].copy())
+    
+    if not segments:
+        return df_sorted
+    
+    # Concatenate segments with NaN separator rows between them
+    # This ensures plotly draws disconnected line segments
+    result_parts = []
+    for i, seg in enumerate(segments):
+        result_parts.append(seg)
+        if i < len(segments) - 1:
+            # Create a separator row with NaN values to break the line
+            sep = pd.DataFrame([{c: np.nan for c in df_sorted.columns}])
+            # Keep the time column as NaT for the separator
+            sep[time_col] = pd.NaT
+            result_parts.append(sep)
+    
+    result = pd.concat(result_parts, ignore_index=True)
+    return result
+
+
 def create_date_range_slider(df: pd.DataFrame, key_prefix: str):
     """Create a date range slider and return filtered dataframe."""
     if 'datetime' not in df.columns or df['datetime'].isna().all():
@@ -3672,7 +3742,7 @@ def main():
     # Folder selection
     available_folders = get_database_folders(db_folder)
     selected_folder = st.sidebar.selectbox(
-        "Cartella (Folder):",
+        "Folder:",
         options=available_folders,
         help="Select a subdirectory inside the Database folder",
         key=f"folder_selector_{st.session_state['db_folder_refresh']}"
@@ -3693,12 +3763,12 @@ def main():
         db_options = ["(None)"] + available_dbs
 
         selected_db = st.sidebar.selectbox(
-            "Select a database:",
+            "File:",
             options=db_options,
             help="Select a database from the Database folder",
             key=f"db_selector_{st.session_state['db_folder_refresh']}"
         )
-        if st.sidebar.button("\U0001f504 Aggiorna lista", help="Refresh folder", key="refresh_db_folder", use_container_width=True):
+        if st.sidebar.button("Refresh folders", help="Refresh folder", key="refresh_db_folder", use_container_width=True):
             st.session_state["db_folder_refresh"] += 1
             st.rerun()
 
@@ -3840,8 +3910,20 @@ def main():
     show_quality = st.session_state.get("show_quality_toggle", False)
     show_mqtt_calc = st.session_state.get("show_mqtt_calc_toggle", False)
     mqtt_interval = st.session_state.get("mqtt_interval_slider", 1)
+    remove_gaps_enabled = st.session_state.get("remove_gaps_toggle", False)
+    gap_threshold_value = st.session_state.get("gap_threshold_value", 1)
+    gap_threshold_unit = st.session_state.get("gap_threshold_unit", "m")
     if show_mqtt_calc and mqtt_stats is None:
         mqtt_stats = MqttStats()
+    
+    # Calculate gap threshold in seconds
+    gap_threshold_seconds = gap_threshold_value
+    if gap_threshold_unit == "s":
+        gap_threshold_seconds = gap_threshold_value
+    elif gap_threshold_unit == "m":
+        gap_threshold_seconds = gap_threshold_value * 60
+    elif gap_threshold_unit == "h":
+        gap_threshold_seconds = gap_threshold_value * 3600
 
     # Create tabs for different data types
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
@@ -3913,6 +3995,12 @@ def main():
             else:
                 df_tilt_filtered = df_tilt_raw.copy()
 
+            # Apply gap removal if enabled
+            if remove_gaps_enabled:
+                df_sensors_filtered = remove_data_gaps(df_sensors_filtered, gap_threshold_seconds)
+                if not df_tilt_raw.empty:
+                    df_tilt_filtered = remove_data_gaps(df_tilt_filtered, gap_threshold_seconds)
+
             # Plot Sensors with comparison overlay
             res = plot_sensor_data(
                 df_sensors_filtered, x_axis_res, show_quality, False, mqtt_interval, mqtt_stats,
@@ -3956,6 +4044,10 @@ def main():
             df_power = get_table_data(conn, 'power_analyzer_data')
         
         if not df_power.empty:
+            # Apply gap removal to power data if enabled
+            if remove_gaps_enabled and 'datetime' in df_power.columns:
+                df_power = remove_data_gaps(df_power, gap_threshold_seconds)
+            
             # Drop obsolete 'harmonics_' columns from power analyzer data since they are visualized in the Harmonics tab
             harmonics_cols = [c for c in df_power.columns if isinstance(c, str) and c.startswith('harmonics_')]
             if harmonics_cols:
@@ -4049,6 +4141,28 @@ def main():
     show_quality = st.sidebar.toggle("Transmission Quality", value=show_quality, help="Highlight missing data and show success rate.", key="show_quality_toggle")
     show_mqtt_calc = st.sidebar.toggle("MQTT Packets", value=show_mqtt_calc, help="Calculate and show optimized MQTT JSON payload size.", key="show_mqtt_calc_toggle")
     enable_comparison = st.sidebar.toggle("DB Comparison", value=enable_comparison, help="Enable comparison with a second database.", key="enable_db_comparison")
+    remove_gaps_enabled = st.sidebar.toggle("Remove Data Gaps", value=remove_gaps_enabled, help="Remove idle periods (data gaps) from timeseries charts to get a compact view.", key="remove_gaps_toggle")
+    
+    if remove_gaps_enabled:
+        gap_col1, gap_col2 = st.sidebar.columns([2, 1])
+        with gap_col1:
+            gap_threshold_value = st.number_input(
+                "Gap Threshold",
+                min_value=1,
+                max_value=9999,
+                value=gap_threshold_value,
+                step=1,
+                key="gap_threshold_value",
+                help="Minimum gap duration to remove from the visualization."
+            )
+        with gap_col2:
+            gap_threshold_unit = st.selectbox(
+                "Unit",
+                options=["s", "m", "h"],
+                index=["s", "m", "h"].index(gap_threshold_unit),
+                key="gap_threshold_unit",
+                help="s = seconds, m = minutes, h = hours"
+            )
     
     if show_mqtt_calc:
         mqtt_interval = st.sidebar.slider(
