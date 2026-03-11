@@ -311,6 +311,17 @@ def get_database_files(folder_path: Path) -> list:
     return []
 
 
+def get_database_folders(base_folder: Path) -> list:
+    """Get list of relative paths for all subdirectories within the base folder."""
+    folders = ["Database"]
+    if base_folder.exists():
+        for p in base_folder.rglob("*"):
+            if p.is_dir() and not p.name.startswith(('.', '__')):
+                # Use .replace('\\', '/') to ensure consistent format across OS
+                folders.append(str(p.relative_to(base_folder)).replace('\\', '/'))
+    return folders
+
+
 def load_database(db_path: str) -> sqlite3.Connection:
     """Load SQLite database and return connection."""
     return sqlite3.connect(db_path)
@@ -3641,7 +3652,7 @@ def display_combined_mqtt_simulation(df_sensor, cols_sensor, df_tilt, cols_tilt,
 
 def main():
     """Main application function."""
-    st.markdown('<h1 class="main-header">Flowsense database analyzer</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">Field Module database analyzer</h1>', unsafe_allow_html=True)
     
     # Sidebar logo
     logo_path = Path(__file__).parent / "Data-Flow Logo PNG.png"
@@ -3649,7 +3660,7 @@ def main():
         st.sidebar.image(str(logo_path), width="stretch")
 
     # Sidebar for database selection
-    st.sidebar.header("Database in folder")
+    st.sidebar.header("File selector")
     
     # Default database folder
     db_folder = DEFAULT_DATABASE_FOLDER
@@ -3657,6 +3668,18 @@ def main():
     # Refresh counter to force re-scan of folder
     if "db_folder_refresh" not in st.session_state:
         st.session_state["db_folder_refresh"] = 0
+
+    # Folder selection
+    available_folders = get_database_folders(db_folder)
+    selected_folder = st.sidebar.selectbox(
+        "Cartella (Folder):",
+        options=available_folders,
+        help="Select a subdirectory inside the Database folder",
+        key=f"folder_selector_{st.session_state['db_folder_refresh']}"
+    )
+    
+    if selected_folder and selected_folder != "Database":
+        db_folder = db_folder / selected_folder
 
     # Show available databases (re-read on every refresh)
     available_dbs = get_database_files(db_folder)
@@ -3725,19 +3748,35 @@ def main():
     if enable_comparison:
         st.sidebar.markdown("---")
         st.sidebar.subheader("Comparison Database")
-        # Comparison database selection from folder
-        comp_available_dbs = [db for db in available_dbs if db != selected_db] if available_dbs else []
         
+        # Folder selection for comparison
+        comp_selected_folder = st.sidebar.selectbox(
+            "Cartella di confronto (Compare Folder):",
+            options=available_folders,
+            help="Select a subdirectory for the comparison database",
+            key="comp_folder_selector"
+        )
+        
+        comp_db_folder = DEFAULT_DATABASE_FOLDER
+        if comp_selected_folder and comp_selected_folder != "Database":
+            comp_db_folder = comp_db_folder / comp_selected_folder
+            
+        comp_available_dbs = get_database_files(comp_db_folder)
+        
+        # If same folder, remove the already selected db from options
+        if comp_db_folder == db_folder and comp_available_dbs:
+            comp_available_dbs = [db for db in comp_available_dbs if db != selected_db]
+            
         comp_selected_db = None
         if comp_available_dbs:
             comp_selected_db = st.sidebar.selectbox(
                 "Select comparison database:",
                 options=["(None)"] + comp_available_dbs,
-                help="Select a database from the Database folder to compare",
+                help="Select a database from the selected folder to compare",
                 key="comp_db_selector"
             )
             if comp_selected_db and comp_selected_db != "(None)":
-                comp_db_path = db_folder / comp_selected_db
+                comp_db_path = comp_db_folder / comp_selected_db
                 comp_db_name = Path(comp_selected_db).stem
         
         # Comparison database upload
@@ -3917,6 +3956,11 @@ def main():
             df_power = get_table_data(conn, 'power_analyzer_data')
         
         if not df_power.empty:
+            # Drop obsolete 'harmonics_' columns from power analyzer data since they are visualized in the Harmonics tab
+            harmonics_cols = [c for c in df_power.columns if isinstance(c, str) and c.startswith('harmonics_')]
+            if harmonics_cols:
+                df_power = df_power.drop(columns=harmonics_cols)
+
             # Check for empty parameters
             empty_power_cols = get_empty_columns(df_power, EXCLUDE_METADATA_COLS)
             if empty_power_cols:
