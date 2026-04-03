@@ -881,18 +881,43 @@ def create_date_range_slider(df: pd.DataFrame, key_prefix: str):
     if 'datetime' not in df.columns or df['datetime'].isna().all():
         return df.copy(), 'id'
     
-    min_date = df['datetime'].min()
-    max_date = df['datetime'].max()
+    min_date = df['datetime'].min().to_pydatetime()
+    max_date = df['datetime'].max().to_pydatetime()
     
+    # Shared state key for synchronization
+    shared_range_key = "global_time_range"
+    
+    # Initialize global range if missing
+    if shared_range_key not in st.session_state:
+        st.session_state[shared_range_key] = (min_date, max_date)
+    
+    # Current shared value
+    g_start, g_end = st.session_state[shared_range_key]
+    
+    # Clamping for this specific slider's range (ensure it fits within current DB bounds)
+    clamped_val = (
+        max(min_date, min(max_date, g_start)),
+        max(min_date, min(max_date, g_end))
+    )
+    
+    # Safety: if clamped range became invalid, reset to full range of this DB
+    if clamped_val[0] >= clamped_val[1]:
+        clamped_val = (min_date, max_date)
+
+    # Callback to sync this widget with the global range
+    def sync_range():
+        st.session_state[shared_range_key] = st.session_state[f"{key_prefix}_range"]
+
     # Date range slider with second-level resolution
     date_range = st.slider(
         "Select Date/Time Range",
-        min_value=min_date.to_pydatetime(),
-        max_value=max_date.to_pydatetime(),
-        value=(min_date.to_pydatetime(), max_date.to_pydatetime()),
+        min_value=min_date,
+        max_value=max_date,
+        value=clamped_val,
         step=timedelta(seconds=1),
         format="DD/MM/YY HH:mm:ss",
-        key=f"{key_prefix}_range"
+        key=f"{key_prefix}_range",
+        on_change=sync_range
     )
     
     # Filter data based on range
@@ -3009,14 +3034,34 @@ def plot_comparison_data(conn: sqlite3.Connection, comp_conn: sqlite3.Connection
         min_date_global = min(all_mins)
         max_date_global = max(all_maxs)
         
+        # Shared state key for synchronization
+        shared_range_key = "global_time_range"
+        
+        # Initialize if missing
+        if shared_range_key not in st.session_state:
+            st.session_state[shared_range_key] = (min_date_global.to_pydatetime(), max_date_global.to_pydatetime())
+            
+        # Clamping
+        g_start, g_end = st.session_state[shared_range_key]
+        clamped_val = (
+            max(min_date_global.to_pydatetime(), min(max_date_global.to_pydatetime(), g_start)),
+            max(min_date_global.to_pydatetime(), min(max_date_global.to_pydatetime(), g_end))
+        )
+        if clamped_val[0] >= clamped_val[1]:
+            clamped_val = (min_date_global.to_pydatetime(), max_date_global.to_pydatetime())
+
+        def sync_comp_range():
+            st.session_state[shared_range_key] = st.session_state["comparison_range_slider"]
+
         date_range = st.slider(
             "Select Date/Time Range",
             min_value=min_date_global.to_pydatetime(),
             max_value=max_date_global.to_pydatetime(),
-            value=(min_date_global.to_pydatetime(), max_date_global.to_pydatetime()),
+            value=clamped_val,
             step=timedelta(seconds=1),
             format="DD/MM/YY HH:mm:ss",
-            key="comparison_range_slider"
+            key="comparison_range_slider",
+            on_change=sync_comp_range
         )
     
     
