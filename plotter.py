@@ -2515,6 +2515,17 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
 
         # Plot
         plot_fft_comparison(primary_source, primary_row_idx, comp_source, comp_row_idx, update_global_stats=True, p_col=p_color_choice, c_col=c_color_choice, p_label=primary_label_str, c_label=comp_label_str)
+    thermal_camera_scale = [
+        [0.00, "rgb(0, 0, 0)"],
+        [0.12, "rgb(25, 25, 112)"],
+        [0.28, "rgb(0, 90, 255)"],
+        [0.45, "rgb(0, 200, 255)"],
+        [0.62, "rgb(0, 255, 140)"],
+        [0.76, "rgb(255, 240, 0)"],
+        [0.88, "rgb(255, 120, 0)"],
+        [1.00, "rgb(255, 0, 0)"]
+    ]
+
     # Common filters for subtabs 2 and 3
     # Get available axes and types
     available_axes = df['axis'].dropna().unique().tolist() if 'axis' in df.columns else ['X', 'Y', 'Z']
@@ -2546,6 +2557,10 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
             df_hm = df_hm[df_hm['axis'] == selected_axis_hm]
         if 'type' in df_hm.columns:
             df_hm = df_hm[df_hm['type'] == selected_type_hm]
+        if 'datetime' in df_hm.columns:
+            df_hm = df_hm.sort_values('datetime')
+        elif 'unix_start' in df_hm.columns:
+            df_hm = df_hm.sort_values('unix_start')
             
         # Slider for number of samples (only show if more than 1 sample)
         if not df_hm.empty:
@@ -2602,8 +2617,13 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     fft_vals = [v / 2.0 for v in fft_vals]
                 
                 heatmap_data.append(fft_vals)
-                interval = row.get('human_interval_of_analysis', f'Sample {idx}')
-                y_labels.append(str(interval))
+                interval = row.get('human_interval_of_analysis')
+                if pd.notna(interval):
+                    y_labels.append(str(interval))
+                elif 'datetime' in row and pd.notna(row['datetime']):
+                    y_labels.append(pd.to_datetime(row['datetime']).strftime('%d/%m/%Y %H:%M:%S'))
+                else:
+                    y_labels.append(f"Sample {idx}")
             
             custom_blue_scale = [
                 [0.0, "rgb(15, 25, 50)"],    # Deep Navy base
@@ -2624,7 +2644,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                 zmax=heatmap_zmax,
                 x=freqs_hm,
                 y=y_labels,
-                colorscale=custom_blue_scale,
+                colorscale=thermal_camera_scale,
                 colorbar=dict(
                     title='Amplitude',
                     thickness=20,
@@ -2678,7 +2698,7 @@ def plot_fft_data(df: pd.DataFrame, show_quality: bool = True, show_mqtt_calc: b
                     z=z_3d,
                     x=freqs_hm,
                     y=y_3d,
-                    colorscale=custom_blue_scale,
+                    colorscale=thermal_camera_scale,
                     contours_z=dict(
                         show=True,
                         usecolormap=True,
