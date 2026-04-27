@@ -15,6 +15,8 @@ import numpy as np
 from datetime import timedelta
 import json
 import math
+import hashlib
+from typing import Optional, Tuple, Union
 
 # Page configuration
 st.set_page_config(
@@ -327,6 +329,80 @@ def load_database(db_path: str) -> sqlite3.Connection:
     return sqlite3.connect(db_path)
 
 
+def save_uploaded_database(uploaded_file, temp_path: Path, state_key: str) -> Path:
+    """Persist an uploaded DB only when its content changes, preserving cache validity."""
+    file_bytes = uploaded_file.getvalue()
+    signature = (uploaded_file.name, len(file_bytes), hashlib.sha256(file_bytes).hexdigest())
+
+    if st.session_state.get(state_key) != signature or not temp_path.exists():
+        with open(temp_path, 'wb') as f:
+            f.write(file_bytes)
+        st.session_state[state_key] = signature
+
+    return temp_path
+
+
+def _quote_identifier(identifier: str) -> str:
+    """Safely quote a SQLite identifier."""
+    return '"' + str(identifier).replace('"', '""') + '"'
+
+
+def _get_connection_db_path(conn: sqlite3.Connection) -> Optional[str]:
+    """Return the filesystem path for the main database attached to a connection."""
+    try:
+        for _, name, file_path in conn.execute("PRAGMA database_list").fetchall():
+            if name == "main" and file_path:
+                return file_path
+    except sqlite3.Error:
+        return None
+    return None
+
+
+def _db_signature_from_path(db_path: Optional[Union[str, Path]]) -> Optional[Tuple[str, int, int]]:
+    """Build a cache signature that invalidates when the DB file changes."""
+    if not db_path:
+        return None
+
+    try:
+        path = Path(db_path).resolve()
+        stat = path.stat()
+        return str(path), stat.st_mtime_ns, stat.st_size
+    except OSError:
+        return None
+
+
+def _db_signature(conn: sqlite3.Connection) -> Optional[Tuple[str, int, int]]:
+    """Build a cache signature for a SQLite connection."""
+    return _db_signature_from_path(_get_connection_db_path(conn))
+
+
+@st.cache_data(show_spinner=False)
+def _cached_table_exists(db_path: str, db_mtime_ns: int, db_size: int, table_name: str) -> bool:
+    del db_mtime_ns, db_size
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,)
+        )
+        return cursor.fetchone() is not None
+
+
+@st.cache_data(show_spinner=False)
+def _cached_read_table(db_path: str, db_mtime_ns: int, db_size: int, table_name: str) -> pd.DataFrame:
+    del db_mtime_ns, db_size
+    query = f"SELECT * FROM {_quote_identifier(table_name)}"
+    with sqlite3.connect(db_path) as conn:
+        return pd.read_sql_query(query, conn)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_table_data(db_path: str, db_mtime_ns: int, db_size: int, table_name: str) -> pd.DataFrame:
+    df = _cached_read_table(db_path, db_mtime_ns, db_size, table_name)
+    if 'human_timestamp' in df.columns:
+        df['datetime'] = pd.to_datetime(df['human_timestamp'], format='%d/%m/%Y - %H:%M:%S', errors='coerce')
+    return df
+
+
 def analyze_transmission_quality(df: pd.DataFrame, time_col: str = 'datetime', column_name: str = None) -> tuple:
     """
     Analyze data transmission quality by detecting gaps.
@@ -469,7 +545,11 @@ def analyze_transmission_quality(df: pd.DataFrame, time_col: str = 'datetime', c
 def get_table_data(conn: sqlite3.Connection, table_name: str) -> pd.DataFrame:
     """Load data from a table into a DataFrame."""
     try:
-        df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+        signature = _db_signature(conn)
+        if signature:
+            return _cached_table_data(*signature, table_name)
+
+        df = pd.read_sql_query(f"SELECT * FROM {_quote_identifier(table_name)}", conn)
         if 'human_timestamp' in df.columns:
             df['datetime'] = pd.to_datetime(df['human_timestamp'], format='%d/%m/%Y - %H:%M:%S', errors='coerce')
         return df
@@ -478,8 +558,20 @@ def get_table_data(conn: sqlite3.Connection, table_name: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _get_raw_table_data(conn: sqlite3.Connection, table_name: str) -> pd.DataFrame:
+    """Load a raw table, using the DB file cache when possible."""
+    signature = _db_signature(conn)
+    if signature:
+        return _cached_read_table(*signature, table_name)
+    return pd.read_sql_query(f"SELECT * FROM {_quote_identifier(table_name)}", conn)
+
+
 def check_table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     """Check if a table exists in the database."""
+    signature = _db_signature(conn)
+    if signature:
+        return _cached_table_exists(*signature, table_name)
+
     cursor = conn.cursor()
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
     return cursor.fetchone() is not None
@@ -556,7 +648,7 @@ def convert_flowsense_to_sensor_data(conn: sqlite3.Connection) -> pd.DataFrame:
     if not check_table_exists(conn, 'flowsense'):
         return pd.DataFrame()
     try:
-        df = pd.read_sql_query("SELECT * FROM flowsense", conn)
+        df = _get_raw_table_data(conn, 'flowsense')
         if df.empty:
             return pd.DataFrame()
         
@@ -584,7 +676,7 @@ def convert_flowsense_to_tilt_data(conn: sqlite3.Connection) -> pd.DataFrame:
     if not check_table_exists(conn, 'flowsense'):
         return pd.DataFrame()
     try:
-        df = pd.read_sql_query("SELECT * FROM flowsense", conn)
+        df = _get_raw_table_data(conn, 'flowsense')
         if df.empty:
             return pd.DataFrame()
         
@@ -604,7 +696,7 @@ def convert_new_power_analyzer(conn: sqlite3.Connection) -> pd.DataFrame:
     if not check_table_exists(conn, 'power_analyzer'):
         return pd.DataFrame()
     try:
-        df = pd.read_sql_query("SELECT * FROM power_analyzer", conn)
+        df = _get_raw_table_data(conn, 'power_analyzer')
         if df.empty:
             return pd.DataFrame()
         
@@ -632,7 +724,7 @@ def convert_vibrations_to_fft_data(conn: sqlite3.Connection) -> pd.DataFrame:
     if not check_table_exists(conn, 'vibrations'):
         return pd.DataFrame()
     try:
-        df = pd.read_sql_query("SELECT * FROM vibrations", conn)
+        df = _get_raw_table_data(conn, 'vibrations')
         if df.empty:
             return pd.DataFrame()
         
@@ -691,7 +783,7 @@ def convert_harmonics_to_tables(conn: sqlite3.Connection) -> dict:
     if not check_table_exists(conn, 'harmonics'):
         return {}
     try:
-        df = pd.read_sql_query("SELECT * FROM harmonics", conn)
+        df = _get_raw_table_data(conn, 'harmonics')
         if df.empty:
             return {}
         
@@ -762,7 +854,7 @@ def convert_new_gps(conn: sqlite3.Connection) -> pd.DataFrame:
     if not check_table_exists(conn, 'gps'):
         return pd.DataFrame()
     try:
-        df = pd.read_sql_query("SELECT * FROM gps", conn)
+        df = _get_raw_table_data(conn, 'gps')
         if df.empty:
             return pd.DataFrame()
         
@@ -3858,11 +3950,7 @@ def main():
     )
     upload_success_placeholder = st.sidebar.empty()
     if uploaded_file is not None:
-        # Save uploaded file temporarily
-        temp_path = Path("temp_uploaded.db")
-        with open(temp_path, 'wb') as f:
-            f.write(uploaded_file.getvalue())
-        db_path = temp_path
+        db_path = save_uploaded_database(uploaded_file, Path("temp_uploaded.db"), "uploaded_db_signature")
     
     # --- Comparison Database Section ---
     # Initialize enable_comparison from session state (toggle defined later in Analysis Settings)
@@ -3924,11 +4012,7 @@ def main():
         comp_upload_placeholder = st.sidebar.empty()
         
         if comp_uploaded_file is not None:
-            # Save uploaded comparison file temporarily
-            comp_temp_path = Path("temp_comparison.db")
-            with open(comp_temp_path, 'wb') as f:
-                f.write(comp_uploaded_file.getvalue())
-            comp_db_path = comp_temp_path
+            comp_db_path = save_uploaded_database(comp_uploaded_file, Path("temp_comparison.db"), "comp_uploaded_db_signature")
             comp_db_name = Path(comp_uploaded_file.name).stem
         
         # Load comparison database
@@ -3966,11 +4050,6 @@ def main():
     if enable_comparison and comp_conn:
         comp_db_format = detect_db_format(comp_conn)
     
-    # Pre-convert new-format harmonics data (needed for Tab 5)
-    harmonics_converted = {}
-    if db_format == 'new':
-        harmonics_converted = convert_harmonics_to_tables(conn)
-    
     # Initialize variables for usage in tabs before the sidebar toggles are defined at the end
     show_quality = st.session_state.get("show_quality_toggle", False)
     show_mqtt_calc = st.session_state.get("show_mqtt_calc_toggle", False)
@@ -3990,18 +4069,17 @@ def main():
     elif gap_threshold_unit == "h":
         gap_threshold_seconds = gap_threshold_value * 3600
 
-    # Create tabs for different data types
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "Compare",
-        "Sensors",
-        "Power Analyzer",
-        "FFT",
-        "Harmonics",
-        "GPS"
-    ])
+    # Streamlit tabs render every tab eagerly, so a radio keeps database loading lazy.
+    selected_view = st.radio(
+        "View",
+        ["Compare", "Sensors", "Power Analyzer", "FFT", "Harmonics", "GPS"],
+        index=1,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="selected_view"
+    )
     
-    # Tab 1: Compare
-    with tab1:
+    if selected_view == "Compare":
         plot_comparison_data(
             conn,
             comp_conn=comp_conn if enable_comparison else None,
@@ -4009,8 +4087,7 @@ def main():
             comparison_label=comp_db_name
         )
     
-    # Tab 2: Sensors
-    with tab2:
+    elif selected_view == "Sensors":
         df_sensor_res = None
         cols_sensor_res = []
         x_axis_res = None
@@ -4099,8 +4176,7 @@ def main():
                 df_tilt_filtered, x_axis_res = create_date_range_slider(df_tilt_raw, "tilt_only")
                 plot_tilt_data(df_tilt_filtered, x_axis_res, show_quality, show_mqtt_calc, mqtt_interval, mqtt_stats)
     
-    # Tab 3: Power Analyzer
-    with tab3:
+    elif selected_view == "Power Analyzer":
         # Load power analyzer data (new or old format)
         df_power = pd.DataFrame()
         if db_format == 'new':
@@ -4140,8 +4216,7 @@ def main():
         else:
             st.warning("Power analyzer data table not found in database.")
     
-    # Tab 4: FFT
-    with tab4:
+    elif selected_view == "FFT":
         # Load FFT data (new or old format)
         df_fft = pd.DataFrame()
         if db_format == 'new':
@@ -4167,12 +4242,15 @@ def main():
         else:
             st.warning("FFT data table not found in database.")
             
-    # Tab 5: Harmonics
-    with tab5:
+    elif selected_view == "Harmonics":
         # Check for any harmonics tables (old format or converted from new)
         harmonics_tables = ['V_harmonic_L1', 'V_harmonic_L2', 'V_harmonic_L3', 
                            'I_harmonic_L1', 'I_harmonic_L2', 'I_harmonic_L3']
         
+        harmonics_converted = {}
+        if db_format == 'new':
+            harmonics_converted = convert_harmonics_to_tables(conn)
+
         if db_format == 'new' and harmonics_converted:
             available_harmonics = list(harmonics_converted.keys())
             if available_harmonics:
@@ -4186,8 +4264,7 @@ def main():
             else:
                 st.warning("No harmonics data tables found in database.")
     
-    # Tab 6: GPS
-    with tab6:
+    elif selected_view == "GPS":
         # Load GPS data (new or old format)
         df_gps = pd.DataFrame()
         if db_format == 'new':
