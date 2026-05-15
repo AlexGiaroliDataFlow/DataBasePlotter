@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Data Flow Battle</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell" aria-label="Data Flow Battle game">
+      <canvas id="game" width="1280" height="720" aria-label="Battle arena"></canvas>
+
+      <section class="hud" aria-label="Combat status">
+        <div class="brand">
+          <img src="../Data-Flow%20Logo%20PNG.png" alt="Data-Flow logo">
+          <div>
+            <strong>Data Flow Battle</strong>
+            <span id="phaseLabel">Pipeline armed</span>
+          </div>
+        </div>
+
+        <div class="meters" aria-label="Main meters">
+          <label>
+            <span>Integrity</span>
+            <meter id="integrityMeter" min="0" max="100" value="100"></meter>
+          </label>
+          <label>
+            <span>Boss</span>
+            <meter id="bossMeter" min="0" max="100" value="100"></meter>
+          </label>
+          <label>
+            <span>Throughput</span>
+            <meter id="flowMeter" min="0" max="100" value="0"></meter>
+          </label>
+        </div>
+
+        <div class="readout" aria-live="polite">
+          <span id="bossName">Data-Flow Boss</span>
+          <span id="score">0 clean packets</span>
+        </div>
+      </section>
+
+      <section class="abilities" aria-label="Abilities">
+        <button type="button" data-ability="burst" title="Compress Burst (1)">
+          <span>1</span>
+          <strong>Burst</strong>
+        </button>
+        <button type="button" data-ability="shield" title="Firewall Shield (2)">
+          <span>2</span>
+          <strong>Shield</strong>
+        </button>
+        <button type="button" data-ability="reroute" title="Reroute Pulse (3)">
+          <span>3</span>
+          <strong>Reroute</strong>
+        </button>
+      </section>
+
+      <section class="overlay" id="overlay" aria-live="polite">
+        <div class="panel">
+          <p class="kicker">Data pipeline defense</p>
+          <h1>Battle corrupted flow controllers</h1>
+          <p id="overlayText">
+            Move through the stream, fire clean packets, and keep pipeline integrity above zero.
+          </p>
+          <button type="button" id="startButton">Start Battle</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="game.js"></script>
+  </body>
+</html>
